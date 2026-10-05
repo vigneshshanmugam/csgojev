@@ -5,7 +5,7 @@
  *   pnpm duel:cs            # 1 round, rusher, mock Jev unless TYPESAFE_API_KEY is set
  *   pnpm duel:cs 5 jiggler  # rounds, behaviour
  *   pnpm duel:cs 5 rusher --no-aim-gate   # same rounds with the aim gate off, to compare against
- *   BRAIN=rule pnpm duel:cs 5             # a baseline brain instead of Jev (see brains.ts)
+ *   BRAIN=sweep pnpm duel:cs 5            # a baseline brain instead of Jev (see brains.ts)
  */
 import type { BrainName } from './brains';
 import { makeClient } from './jevClient';

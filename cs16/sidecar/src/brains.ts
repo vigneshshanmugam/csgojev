@@ -11,10 +11,11 @@
  *   rushhold  rush that never falls back while scoped (see rushHoldChoice)
  *   left/right fixed split-lane openers
  *   cue     split-lane script: wait for side cues, then peek that side
+ *   sweep   split-lane script: check left, then switch sides after a dry peek
  */
 import { NOOP_ID, type JevAnswer, type JevClient, type JevRequest } from '@xstate/jev';
 
-export const brains = ['jev', 'jevmem', 'rule', 'rush', 'rushhold', 'left', 'right', 'cue', 'random', 'mock'] as const;
+export const brains = ['jev', 'jevmem', 'rule', 'rush', 'rushhold', 'left', 'right', 'cue', 'sweep', 'random', 'mock'] as const;
 /** Brains that call Jev, and so need a key to mean anything. */
 export const isJev = (brain: string) => brain === 'jev' || brain === 'jevmem';
 export type BrainName = (typeof brains)[number];
@@ -42,6 +43,7 @@ const PEEK_RIGHT = 'enemy.peekRight';
 const STRAFE = 'enemy.counterStrafe';
 const SHOOT = 'enemy.shoot';
 const FALL_BACK = 'enemy.fallBack';
+type SplitSide = 'left' | 'right';
 
 /** The thresholds the rule brain acts on, in one place so a report can quote them. */
 export const RULES = {
@@ -56,6 +58,8 @@ export const RULES = {
   /** Below this HP, retreat rather than wait for aim to settle. */
   retreatBelowHp: 50,
 } as const;
+/** How long sweep commits to a dry side before checking the other lane. */
+export const SWEEP_SIDE_SECONDS = 3;
 
 /** The rule brain's choice for one situation, from the options the machine offers. */
 export function ruleChoice(s: Situation, offered: readonly string[]): string {
@@ -100,6 +104,8 @@ export function rushHoldChoice(s: Situation, offered: readonly string[]): string
 }
 
 const peekFor = (side: 'left' | 'right') => side === 'left' ? PEEK_LEFT : PEEK_RIGHT;
+const otherSide = (side: SplitSide): SplitSide => side === 'left' ? 'right' : 'left';
+const splitSide = (side: Situation['side']): SplitSide | null => side === 'left' || side === 'right' ? side : null;
 
 export function fixedSideChoice(side: 'left' | 'right', s: Situation, offered: readonly string[]): string {
   const pick = peekFor(side);
@@ -122,6 +128,39 @@ export function cueChoice(s: Situation, offered: readonly string[], rand: () => 
   return ruleChoice(s, offered);
 }
 
+export function createSweepChoice(now: () => number = () => Date.now() / 1000): (s: Situation, offered: readonly string[]) => string {
+  let nextSide: SplitSide = 'left';
+  let active: { side: SplitSide; startedAt: number; sawPlayer: boolean } | null = null;
+  let lastRoundSecondsLeft: number | undefined;
+
+  return (s, offered) => {
+    const has = (id: string) => offered.includes(id);
+    const currentSide = splitSide(s.side);
+    if (lastRoundSecondsLeft !== undefined && s.roundSecondsLeft > lastRoundSecondsLeft) {
+      nextSide = 'left';
+      active = null;
+    }
+    lastRoundSecondsLeft = s.roundSecondsLeft;
+
+    if (s.you === 'holding' && has(peekFor(nextSide))) {
+      active = { side: nextSide, startedAt: now(), sawPlayer: false };
+      return peekFor(nextSide);
+    }
+
+    if (currentSide && (!active || active.side !== currentSide)) {
+      active = { side: currentSide, startedAt: now(), sawPlayer: s.playerInSight };
+    }
+    if (active && s.playerInSight) active.sawPlayer = true;
+    if ((s.you.startsWith('peeking') || s.you === 'scoped') && active && !active.sawPlayer && now() - active.startedAt >= SWEEP_SIDE_SECONDS && has(FALL_BACK)) {
+      nextSide = otherSide(active.side);
+      active = null;
+      return FALL_BACK;
+    }
+
+    return ruleChoice(s, offered);
+  };
+}
+
 /** Answers every choice question with `pick`, in exactly the shape Jev returns. */
 function answerWith(request: JevRequest, pick: (offered: string[]) => { choice: string; probabilities: Record<string, number> }) {
   const answers: Record<string, JevAnswer> = {};
@@ -139,6 +178,8 @@ export const ruleClient = (choose = ruleChoice): JevClient => async (request) =>
     const choice = choose(request.state as Situation, offered);
     return { choice, probabilities: Object.fromEntries(offered.map((o) => [o, o === choice ? 1 : 0])) };
   });
+
+export const sweepClient = (now?: () => number): JevClient => ruleClient(createSweepChoice(now));
 
 export const randomClient = (rand: () => number = Math.random): JevClient => async (request) =>
   answerWith(request, (offered) => ({

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { NOOP_ID, type JevRequest } from '@xstate/jev';
-import { RULES, cueChoice, fixedSideChoice, randomClient, ruleChoice, ruleClient, rushChoice, rushHoldChoice, type Situation } from './brains';
+import { RULES, SWEEP_SIDE_SECONDS, createSweepChoice, cueChoice, fixedSideChoice, randomClient, ruleChoice, ruleClient, rushChoice, rushHoldChoice, type Situation } from './brains';
 import { openRunLog } from './runLog';
 import { MEMORY_ROUNDS, createBot, roundSummary } from './bot';
 import type { Inbound } from './protocol';
@@ -103,6 +103,46 @@ describe('split-lane brains', () => {
     expect(cueChoice(at({ secondsSincePlayerSeen: RULES.peekAfterQuietS }), splitCover, left)).toBe('enemy.peekLeft');
     expect(cueChoice(at({ roundSecondsLeft: RULES.peekWhenRoundLeftS }), splitCover, right)).toBe('enemy.peekRight');
     expect(cueChoice(at({ footstepsFrom: 'left', roundSecondsLeft: RULES.peekWhenRoundLeftS }), splitCover, right)).toBe('enemy.peekLeft');
+  });
+
+  it('sweep opens left without reading split cues', () => {
+    const choose = createSweepChoice(() => 0);
+    expect(choose(at({ footstepsFrom: 'right', playerLastSeenOn: 'right' }), splitCover)).toBe('enemy.peekLeft');
+  });
+
+  it('sweep falls back after a dry side, then checks the other side', () => {
+    let t = 0;
+    const choose = createSweepChoice(() => t);
+    expect(choose(base, splitCover)).toBe('enemy.peekLeft');
+
+    t = SWEEP_SIDE_SECONDS - 0.1;
+    expect(choose(at({ you: 'scoped', side: 'left', roundSecondsLeft: 40 }), ['enemy.fallBack', NOOP_ID])).toBe(NOOP_ID);
+
+    t = SWEEP_SIDE_SECONDS;
+    expect(choose(at({ you: 'scoped', side: 'left', roundSecondsLeft: 40 }), ['enemy.fallBack', NOOP_ID])).toBe('enemy.fallBack');
+    expect(choose(at({ roundSecondsLeft: 40 }), splitCover)).toBe('enemy.peekRight');
+  });
+
+  it('sweep uses normal combat rules after seeing the player', () => {
+    let t = 0;
+    const choose = createSweepChoice(() => t);
+    expect(choose(base, splitCover)).toBe('enemy.peekLeft');
+    expect(choose(at({ you: 'peekingLeft', side: 'left', playerInSight: true, roundSecondsLeft: 40 }), ['enemy.counterStrafe', NOOP_ID]))
+      .toBe('enemy.counterStrafe');
+
+    t = SWEEP_SIDE_SECONDS + 5;
+    expect(choose(at({ you: 'scoped', side: 'left', playerInSight: false, roundSecondsLeft: 40 }), ['enemy.fallBack', NOOP_ID]))
+      .toBe(NOOP_ID);
+  });
+
+  it('sweep resets to left when a new round starts', () => {
+    let t = 0;
+    const choose = createSweepChoice(() => t);
+    expect(choose(base, splitCover)).toBe('enemy.peekLeft');
+    t = SWEEP_SIDE_SECONDS;
+    expect(choose(at({ you: 'scoped', side: 'left', roundSecondsLeft: 40 }), ['enemy.fallBack', NOOP_ID])).toBe('enemy.fallBack');
+    expect(choose(at({ roundSecondsLeft: 40 }), splitCover)).toBe('enemy.peekRight');
+    expect(choose(base, splitCover)).toBe('enemy.peekLeft');
   });
 });
 

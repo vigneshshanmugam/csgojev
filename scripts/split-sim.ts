@@ -8,7 +8,7 @@ import { AWP_DMG, RIFLE_BODY, awpHitChance } from '../src/game/combat';
 import { blocked } from '../src/game/map';
 import { SPLIT_BOXES, SPLIT_HOLD, SPLIT_PEEK_L, SPLIT_PEEK_R, SPLIT_ROUTES, type SplitRoute } from '../src/game/split';
 
-type Brain = 'left' | 'right' | 'cue';
+type Brain = 'left' | 'right' | 'cue' | 'sweep';
 type Result = 'win' | 'loss' | 'draw';
 
 const TICK = 1 / 60;
@@ -17,6 +17,8 @@ const PLAYER_SPEED = 5.5;
 const FOOTSTEP_RANGE = 12;
 const PEEK_SECONDS = 0.55;
 const AIM_SECONDS = 0.35;
+const SWEEP_SIDE_SECONDS = 3;
+const FALL_BACK_SECONDS = 0.55;
 
 function rng(seed: number) {
   let s = seed >>> 0;
@@ -37,8 +39,10 @@ function run(brain: Brain, route: SplitRoute, rand: () => number): Result {
   let target = 0;
   let px = points[0].x, pz = points[0].z;
   let hp = 100, enemyHp = 100;
-  let peekAt: number | null = brain === 'left' || brain === 'right' ? 0 : null;
-  let peekSide: SplitRoute | null = brain === 'left' ? 'left' : brain === 'right' ? 'right' : null;
+  let peekAt: number | null = brain === 'left' || brain === 'right' || brain === 'sweep' ? 0 : null;
+  let peekSide: SplitRoute | null = brain === 'left' || brain === 'sweep' ? 'left' : brain === 'right' ? 'right' : null;
+  let nextSweepPeekAt: number | null = null;
+  let sweepSawPlayer = false;
   let seenSince: number | null = null;
   let lastPlayerShot = -100;
   let fired = false;
@@ -59,10 +63,21 @@ function run(brain: Brain, route: SplitRoute, rand: () => number): Result {
       peekAt = t;
       peekSide = route;
     }
+    if (brain === 'sweep' && peekAt === null && nextSweepPeekAt !== null && t >= nextSweepPeekAt) {
+      peekAt = t;
+      peekSide = peekSide === 'left' ? 'right' : 'left';
+      nextSweepPeekAt = null;
+      sweepSawPlayer = false;
+    }
 
     const peek = peekSide ? peekFor(peekSide) : SPLIT_HOLD;
     const exposed = peekAt !== null && t >= peekAt + PEEK_SECONDS;
     const visible = exposed && !blocked(peek.x, peek.z, px, pz, SPLIT_BOXES);
+    if (brain === 'sweep' && visible) sweepSawPlayer = true;
+    if (brain === 'sweep' && exposed && !visible && !sweepSawPlayer && peekAt !== null && t >= peekAt + SWEEP_SIDE_SECONDS) {
+      peekAt = null;
+      nextSweepPeekAt = t + FALL_BACK_SECONDS;
+    }
 
     if (visible) {
       seenSince ??= t;
@@ -92,7 +107,7 @@ const rounds = Number(process.argv[2] ?? 10_000);
 const seed = Number(process.argv[3] ?? 1);
 const rand = rng(seed);
 
-for (const brain of ['left', 'right', 'cue'] as const) {
+for (const brain of ['left', 'right', 'cue', 'sweep'] as const) {
   const counts = { win: 0, loss: 0, draw: 0 };
   const byRoute: Record<SplitRoute, typeof counts> = {
     left: { win: 0, loss: 0, draw: 0 },

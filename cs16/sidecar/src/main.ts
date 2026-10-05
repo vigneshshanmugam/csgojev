@@ -4,7 +4,7 @@
  *
  *   pnpm sidecar          # mock Jev unless TYPESAFE_API_KEY is set
  *   SLOT=1 pnpm sidecar   # pairs with SLOT=1 cs16/duel.sh: ports 27110/27111
- *   BRAIN=rule pnpm sidecar                  # jev (default) | jevmem | rule | rush | random | mock
+ *   BRAIN=rule pnpm sidecar                  # jev (default) | jevmem | rule | rush | cue | sweep | random | mock
  *   LAYOUT=split pnpm sidecar                # use split-lane machine/events
  *   RUN_LOG=cs16/runs/x.jsonl pnpm sidecar   # write every decision and round outcome
  *
