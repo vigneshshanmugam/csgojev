@@ -42,7 +42,7 @@ trap stop_sidecar EXIT
 PLUGIN_SHA=$(shasum "${ADDONS:-$HERE/overlay/addons}/jevbot/jevbot_mm_i386.so" | cut -c1-12)
 GIT_SHA=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo none)
 # A commit only names the code if nothing tracked was changed on top of it.
-DIRTY=$([ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ] && echo false || echo true)
+DIRTY=$([ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no -- src packages cs16/plugin cs16/sidecar cs16/gamedata cs16/map cs16/body.env 'cs16/*.sh' 2>/dev/null)" ] && echo false || echo true)
 META=$(printf '{"rounds":%s,"weapon":"%s","enemy_weapon":"%s","turn":%s,"scope":%s,"preaim":%s,"difficulty":%s,"zhold":%s,"plugin":"%s","git":"%s","dirty":%s}' \
   "$ROUNDS" "$WEAPON" "${ENEMY_WEAPON:-$WEAPON}" "$TURN" "$SCOPE" "$PREAIM" "$DIFFICULTY" "$ZHOLD" "$PLUGIN_SHA" "$GIT_SHA" "$DIRTY")
 
