@@ -803,6 +803,12 @@ static void DriveBot(float dt, int ms)
 
 // -------------------------------------------------------------- round loop
 
+// Between duel rounds: a pause after the result, then the wait for the respawn.
+// `sv_restartround 1` itself takes 1s, so the wait must stay above that or the
+// round starts on the old round's players.
+static const float COOLDOWN_SECONDS = 1.0f;
+static const float RESTART_WAIT_SECONDS = 1.5f;
+
 static void ResetRoundState()
 {
 	g_lastSeen = -1.0f;
@@ -828,7 +834,7 @@ static void FinishRound(const char *result)
 		g_roundNo, result, gpGlobals->time - g_roundStart, g_shots, g_wins, g_losses, g_draws);
 
 	g_phase = PH_COOLDOWN;
-	g_phaseAt = gpGlobals->time + 4.0f;
+	g_phaseAt = gpGlobals->time + COOLDOWN_SECONDS;
 }
 
 static void RoundTick()
@@ -840,7 +846,7 @@ static void RoundTick()
 		SERVER_COMMAND("sv_restartround 1\n");
 		SERVER_EXECUTE();
 		g_phase = PH_WAIT;
-		g_phaseAt = now + 2.5f;
+		g_phaseAt = now + RESTART_WAIT_SECONDS;
 		break;
 
 	case PH_WAIT:
