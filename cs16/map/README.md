@@ -30,6 +30,13 @@ Output: `cs16/map/out/jev_duel.bsp`. The full compile takes a few seconds on
 this map, so there is little reason to use the fullbright path except when
 debugging geometry.
 
+`cs16/map/build.sh split --lit` also builds `jev_split.bsp`, the two-lane
+experiment map. Its zBot is driven by `jev_zroute`, so the committed
+`cs16/gamedata/maps/jev_split.nav` is only a placeholder copied from
+`jev_duel.nav` to stop Condition Zero from trying to auto-generate a navmesh
+and restarting the server on `bot_add_ct`. Do not treat it as a real navmesh
+for stock zBot pathing.
+
 The script is idempotent: it clones and builds [sdhlt](https://github.com/seedee/sdhlt)
 into `cs16/vendor/` and copies `cs_dust.wad` out of the server image on first
 run, then reuses both. Nothing is installed on the host; both the compiler

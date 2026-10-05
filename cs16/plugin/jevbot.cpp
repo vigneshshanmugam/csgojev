@@ -742,9 +742,10 @@ static void SendObs()
 	float since = g_lastSeen < 0.0f ? -1.0f : gpGlobals->time - g_lastSeen;
 	float left = g_phase == PH_LIVE ? g_roundLen - (gpGlobals->time - g_roundStart) : g_roundLen;
 	const char *wp = Waypoint();
-	bool footsteps = enemySpeed > FOOTSTEP_SPEED_MPS * UNITS_PER_METRE && dist < FOOTSTEP_RANGE_M;
+	bool routed = SplitMap() && g_zRoute >= 0;
+	bool footsteps = routed || (enemySpeed > FOOTSTEP_SPEED_MPS * UNITS_PER_METRE && dist < FOOTSTEP_RANGE_M);
 	int side = g_enemy && !FNullEnt(g_enemy) && g_enemy->v.origin.x > 0.0f ? 1 : 0;
-	const char *footSide = SplitMap() && footsteps ? (side ? "\"right\"" : "\"left\"") : "null";
+	const char *footSide = SplitMap() && footsteps ? ((routed ? g_zRoute : side) ? "\"right\"" : "\"left\"") : "null";
 	const char *seenSide = SplitMap() && g_lastSeenSide >= 0 ? (g_lastSeenSide ? "\"right\"" : "\"left\"") : "null";
 
 	if (left < 0.0f) left = 0.0f;
