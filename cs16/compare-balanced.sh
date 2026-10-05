@@ -7,15 +7,16 @@
 #   cs16/compare-balanced.sh [rounds per block] [brains] [slots]
 #   DIFFICULTY=3 cs16/compare-balanced.sh 7 "jev rush rule" "3 4 6"
 #
-# Rounds per brain = rounds per block x number of slots.
+# Rounds per brain = rounds per block x number of slots. More slots than brains
+# (a multiple) repeat the rotation: "rush rule" on "3 4 6 7" is AB, BA, AB, BA.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 BLOCK=${1:-7}
 read -r -a BRAINS <<< "${2:-jev rush rule}"
 read -r -a SLOTS <<< "${3:-3 4 6}"
-if [ "${#BRAINS[@]}" -ne "${#SLOTS[@]}" ]; then
-  echo "compare-balanced: need as many slots as brains (${#BRAINS[@]})" >&2; exit 1
+if [ $(( ${#SLOTS[@]} % ${#BRAINS[@]} )) -ne 0 ]; then
+  echo "compare-balanced: the slot count must be a multiple of the brain count (${#BRAINS[@]})" >&2; exit 1
 fi
 export RUN_DIR="${RUN_DIR:-$HERE/runs/$(date +%Y%m%d-%H%M%S)-balanced}"
 mkdir -p "$RUN_DIR"

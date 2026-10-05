@@ -2,7 +2,18 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { cohenH, fisher, mergeRuns, readRun, report, roundsNeeded, wilson } from './analyze';
+import {
+  cohenH,
+  conditionalPower,
+  fisher,
+  mergeRuns,
+  readRun,
+  report,
+  roundsNeeded,
+  sequentialLook,
+  twoPropZ,
+  wilson,
+} from './analyze';
 import type { Situation } from './brains';
 
 describe('statistics', () => {
@@ -25,6 +36,25 @@ describe('statistics', () => {
     expect(roundsNeeded(Math.sin(Math.asin(Math.sqrt(0.5)) + 0.1) ** 2, 0.5)).toBe(393);
     expect(roundsNeeded(0.65, 0.5)).toBeGreaterThan(150);
     expect(roundsNeeded(0.9, 0.5)).toBeLessThan(25);
+  });
+});
+
+describe('stopping rule', () => {
+  it('matches the textbook z and conditional power', () => {
+    expect(twoPropZ(60, 100, 40, 100)).toBeCloseTo(2.83, 2);
+    expect(twoPropZ(40, 100, 60, 100)).toBeCloseTo(-2.83, 2);
+    // Under the current trend, z = 0.5 halfway leaves ~4% chance of significance at the cap.
+    expect(conditionalPower(0.5, 0.5)).toBeCloseTo(0.038, 2);
+    expect(conditionalPower(2.0, 0.5)).toBeGreaterThan(0.85);
+  });
+
+  it('stops early only on overwhelming evidence or a hopeless trend', () => {
+    expect(sequentialLook(3.4, 0.25)).toBe('efficacy');
+    expect(sequentialLook(2.5, 0.25)).toBe('continue');
+    expect(sequentialLook(0.3, 0.5)).toBe('futility');
+    expect(sequentialLook(1.5, 0.5)).toBe('continue');
+    expect(sequentialLook(2.0, 1)).toBe('final: significant');
+    expect(sequentialLook(1.9, 1)).toBe('final: not significant');
   });
 });
 

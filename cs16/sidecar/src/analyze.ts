@@ -102,6 +102,38 @@ export function roundsNeeded(p1: number, p2: number): number {
   return h === 0 ? Infinity : Math.ceil(2 * ((1.96 + 0.8416) / h) ** 2);
 }
 
+/** Two-proportion z (pooled), positive when A wins more. */
+export function twoPropZ(wA: number, nA: number, wB: number, nB: number): number {
+  const p = (wA + wB) / (nA + nB);
+  const se = Math.sqrt(p * (1 - p) * (1 / nA + 1 / nB));
+  return se === 0 ? 0 : (wA / nA - wB / nB) / se;
+}
+
+const normalCdf = (x: number) => {
+  // Abramowitz-Stegun 26.2.17, |error| < 7.5e-8.
+  const t = 1 / (1 + 0.2316419 * Math.abs(x));
+  const d = 0.3989423 * Math.exp((-x * x) / 2);
+  const q = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return x >= 0 ? 1 - q : q;
+};
+
+/**
+ * Chance of ending significant (two-sided 0.05) at the cap if the trend so far
+ * holds, from z at information fraction t (rounds so far / cap).
+ */
+export function conditionalPower(z: number, t: number): number {
+  if (t >= 1) return Math.abs(z) >= 1.96 ? 1 : 0;
+  return normalCdf((Math.abs(z) / Math.sqrt(t) - 1.96) / Math.sqrt(1 - t));
+}
+
+/** The pre-registered stopping rule: Haybittle-Peto efficacy, non-binding futility on conditional power. */
+export function sequentialLook(z: number, t: number): 'efficacy' | 'futility' | 'continue' | 'final: significant' | 'final: not significant' {
+  if (t >= 1) return Math.abs(z) >= 1.96 ? 'final: significant' : 'final: not significant';
+  if (Math.abs(z) >= 3.29) return 'efficacy';
+  if (conditionalPower(z, t) < 0.1) return 'futility';
+  return 'continue';
+}
+
 // ------------------------------------------------------------------ reading
 
 /** `offset` keeps round numbers from different files apart once merged. */
@@ -393,15 +425,31 @@ export function report(runs: BrainRun[]): string {
   return out.join('\n');
 }
 
+/** `--look=a,b,cap`: only the stopping-rule verdict for brain a against b, capped at `cap` rounds each. */
+function look(runs: BrainRun[], spec: string): string {
+  const [a, b, cap] = spec.split(',');
+  const [A, B] = [a, b].map((name) => runs.find((r) => r.brain === name));
+  if (!A || !B) throw new Error(`--look: need runs for ${a} and ${b}`);
+  const wins = (r: BrainRun) => r.rounds.filter((x) => x.result === 'win').length;
+  const n = Math.min(A.rounds.length, B.rounds.length);
+  const z = twoPropZ(wins(A), A.rounds.length, wins(B), B.rounds.length);
+  const t = n / Number(cap);
+  return `look: ${a} ${wins(A)}/${A.rounds.length}, ${b} ${wins(B)}/${B.rounds.length}, z ${z.toFixed(2)}, ` +
+    `t ${t.toFixed(2)}, conditional power ${pct(conditionalPower(z, t))} -> ${sequentialLook(z, t)}`;
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const dir = process.argv[2];
-  if (!dir) throw new Error('usage: analyze.ts <run dir>');
+  const args = process.argv.slice(2);
+  const lookSpec = args.find((a) => a.startsWith('--look='))?.slice('--look='.length);
+  const dirs = args.filter((a) => !a.startsWith('--'));
+  if (!dirs.length) throw new Error('usage: analyze.ts <run dir>... [--look=a,b,cap]');
   const order = ['jev', 'jevmem', 'rule', 'rush', 'rushhold', 'random', 'mock'];
-  const runs = mergeRuns(
+  const files = dirs.flatMap((dir) =>
     readdirSync(dir)
       .filter((f) => f.endsWith('.jsonl'))
       .sort()
-      .map((f, i) => readRun(join(dir, f), i * 100_000)),
-  ).sort((a, b) => order.indexOf(a.brain) - order.indexOf(b.brain));
-  console.log(report(runs));
+      .map((f) => join(dir, f)),
+  );
+  const runs = mergeRuns(files.map((f, i) => readRun(f, i * 100_000))).sort((a, b) => order.indexOf(a.brain) - order.indexOf(b.brain));
+  console.log(lookSpec ? look(runs, lookSpec) : report(runs));
 }
