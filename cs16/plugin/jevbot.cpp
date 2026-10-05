@@ -131,7 +131,10 @@ enum ZRouteMode { ZR_OFF, ZR_LEFT, ZR_RIGHT, ZR_RANDOM };
 static ZRouteMode g_zRouteMode = ZR_OFF;
 static int g_zRoute = -1;
 static int g_zRouteLeg = 0;
+static bool g_zRouteActive = false;
 static unsigned int g_zRouteSeed = 1;
+static int g_zRouteCompletes = 0;
+static int g_zRouteReleases = 0;
 
 static void Say(const char *fmt, ...)
 {
@@ -252,11 +255,26 @@ static bool SplitMap();
 static bool Alive(edict_t *p);
 static bool EyeVisible(edict_t *from, edict_t *to);
 
+static const char *ZRouteName(int route)
+{
+	return route < 0 ? "none" : (route ? "right" : "left");
+}
+
+static void ReleaseZRoute(edict_t *fakeclient)
+{
+	if (!g_zRouteActive)
+		return;
+	g_zRouteActive = false;
+	g_zRouteCompletes++;
+	g_zRouteReleases++;
+	Say("[jev] zroute complete: route=%s origin=(%.1f %.1f %.1f) complete=%d released=%d",
+		ZRouteName(g_zRoute), fakeclient->v.origin.x, fakeclient->v.origin.y, fakeclient->v.origin.z,
+		g_zRouteCompletes, g_zRouteReleases);
+}
+
 static bool DriveZRoute(edict_t *fakeclient, const float *viewangles, float upmove, unsigned short buttons, byte impulse, byte msec)
 {
-	if (!SplitMap() || g_zRoute < 0 || g_phase != PH_LIVE)
-		return false;
-	if (Alive(g_bot) && EyeVisible(fakeclient, g_bot))
+	if (!SplitMap() || !g_zRouteActive || g_zRoute < 0 || g_phase != PH_LIVE)
 		return false;
 
 	if (g_zRouteLeg < 2) {
@@ -269,6 +287,12 @@ static bool DriveZRoute(edict_t *fakeclient, const float *viewangles, float upmo
 	float dx = SPLIT_ROUTE_X[g_zRoute][g_zRouteLeg] - fakeclient->v.origin.x;
 	float dy = SPLIT_ROUTE_Y[g_zRoute][g_zRouteLeg] - fakeclient->v.origin.y;
 	float d = sqrtf(dx * dx + dy * dy);
+	if (g_zRouteLeg >= 2 && d <= ARRIVE_RADIUS) {
+		ReleaseZRoute(fakeclient);
+		return false;
+	}
+	if (Alive(g_bot) && EyeVisible(fakeclient, g_bot))
+		return false;
 	float fmove = 0.0f, smove = 0.0f;
 	if (d > ARRIVE_RADIUS) {
 		float y = viewangles[1] * (float)M_PI / 180.0f;
@@ -327,7 +351,9 @@ static void cmd_jev_zroute()
 		g_zRouteMode == ZR_LEFT ? "left" :
 		g_zRouteMode == ZR_RIGHT ? "right" :
 		g_zRouteMode == ZR_RANDOM ? "random" : "off";
-	Say("[jev] zroute=%s seed=%u current=%s", mode, g_zRouteSeed, g_zRoute < 0 ? "none" : (g_zRoute ? "right" : "left"));
+	Say("[jev] zroute=%s seed=%u current=%s active=%d leg=%d complete=%d released=%d",
+		mode, g_zRouteSeed, ZRouteName(g_zRoute), g_zRouteActive ? 1 : 0, g_zRouteLeg,
+		g_zRouteCompletes, g_zRouteReleases);
 }
 
 // The game DLL's GiveNamedItem is not reachable from a Metamod plugin, so the
@@ -742,7 +768,7 @@ static void SendObs()
 	float since = g_lastSeen < 0.0f ? -1.0f : gpGlobals->time - g_lastSeen;
 	float left = g_phase == PH_LIVE ? g_roundLen - (gpGlobals->time - g_roundStart) : g_roundLen;
 	const char *wp = Waypoint();
-	bool routed = SplitMap() && g_zRoute >= 0;
+	bool routed = SplitMap() && g_zRouteActive && g_phase == PH_LIVE;
 	bool footsteps = routed || (enemySpeed > FOOTSTEP_SPEED_MPS * UNITS_PER_METRE && dist < FOOTSTEP_RANGE_M);
 	int side = g_enemy && !FNullEnt(g_enemy) && g_enemy->v.origin.x > 0.0f ? 1 : 0;
 	const char *footSide = SplitMap() && footsteps ? ((routed ? g_zRoute : side) ? "\"right\"" : "\"left\"") : "null";
@@ -938,6 +964,7 @@ static void ResetRoundState()
 	g_yaw = 90.0f;
 	g_pitch = 0.0f;
 	g_zRouteLeg = 0;
+	g_zRouteActive = false;
 	if (!SplitMap() || g_zRouteMode == ZR_OFF) {
 		g_zRoute = -1;
 	} else if (g_zRouteMode == ZR_LEFT) {
@@ -948,6 +975,7 @@ static void ResetRoundState()
 		g_zRouteSeed = g_zRouteSeed * 1664525u + 1013904223u;
 		g_zRoute = (g_zRouteSeed >> 31) & 1;
 	}
+	g_zRouteActive = g_zRoute >= 0 && g_phase != PH_IDLE;
 }
 
 static void FinishRound(const char *result)
@@ -955,6 +983,7 @@ static void FinishRound(const char *result)
 	if (!strcmp(result, "win")) { g_wins++; BridgeEvent("enemy_died", NULL); }
 	else if (!strcmp(result, "loss")) { g_losses++; BridgeEvent("bot_died", NULL); }
 	else g_draws++;
+	g_zRouteActive = false;
 
 	BridgeEvent("round_end", result);
 	Say("[jev] round %d %s after %.1fs, %d shots  (w %d / l %d / d %d)",
@@ -1198,14 +1227,16 @@ static void cmd_jev_stop()
 {
 	g_phase = PH_IDLE;
 	g_roundsLeft = 0;
+	g_zRouteActive = false;
 	Say("[jev] duel stopped at %d rounds: %d wins, %d losses, %d draws",
 		g_roundNo, g_wins, g_losses, g_draws);
 }
 
 static void cmd_jev_report()
 {
-	Say("[jev] rounds %d  wins %d  losses %d  draws %d  obs %d  intents %d  phase %d  state %d",
-		g_roundNo, g_wins, g_losses, g_draws, g_obsSent, g_intentsRx, (int)g_phase, (int)g_mstate);
+	Say("[jev] rounds %d  wins %d  losses %d  draws %d  obs %d  intents %d  phase %d  state %d  zroute %s active %d complete %d released %d",
+		g_roundNo, g_wins, g_losses, g_draws, g_obsSent, g_intentsRx, (int)g_phase, (int)g_mstate,
+		ZRouteName(g_zRoute), g_zRouteActive ? 1 : 0, g_zRouteCompletes, g_zRouteReleases);
 }
 
 static const char *AmmoFor(const char *weapon)
