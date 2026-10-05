@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Rebuild jev_duel.bsp from src/game/map.ts.
+# Rebuild a duel BSP from the prototype geometry.
 #
-#   cs16/map/build.sh          fast, fullbright (no VIS/RAD) -- use while iterating
-#   cs16/map/build.sh --lit    full compile with VIS + RAD
+#   cs16/map/build.sh              fast, fullbright jev_duel
+#   cs16/map/build.sh split --lit  full compile jev_split
 #
 # Everything third-party lands in cs16/vendor/ (gitignored): the sdhlt source,
 # the compiler binaries, and the WADs copied out of the server image.
@@ -14,10 +14,17 @@ VENDOR="$ROOT/cs16/vendor"
 TOOLS="$VENDOR/sdhlt/tools"
 IMAGE="ghcr.io/balintsoos/cs16-web-server:latest"
 BUILDER="debian:bookworm-slim"
-MAP=jev_duel
-
 LIT=0
-[ "${1:-}" = "--lit" ] && LIT=1
+LAYOUT=duel
+for arg in "$@"; do
+  case "$arg" in
+    --lit) LIT=1 ;;
+    duel|jev_duel) LAYOUT=duel ;;
+    split|jev_split) LAYOUT=split ;;
+    *) echo "usage: cs16/map/build.sh [duel|split] [--lit]" >&2; exit 1 ;;
+  esac
+done
+MAP=jev_$LAYOUT
 
 # 1. WADs out of the server image -----------------------------------------
 for wad in cs_dust.wad; do
@@ -43,7 +50,7 @@ fi
 
 # 3. .map from the prototype geometry --------------------------------------
 echo "==> generating $MAP.map"
-( cd "$ROOT" && npx tsx cs16/map/gen.ts )
+( cd "$ROOT" && npx tsx cs16/map/gen.ts "$LAYOUT" )
 
 # 4. compile ---------------------------------------------------------------
 mkdir -p "$HERE/out"

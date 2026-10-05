@@ -50,16 +50,22 @@ subprocess.Popen(["sh", "-c", f"tail -f {fifo} | docker attach --sig-proxy=false
                  stdin=subprocess.DEVNULL, start_new_session=True)
 PY
 
-docker cp "$HERE/map/out/jev_duel.bsp" "$NAME":/xashds/cstrike/maps/jev_duel.bsp
-docker exec -u 0 "$NAME" chown 999:999 /xashds/cstrike/maps/jev_duel.bsp
+for bsp in "$HERE"/map/out/jev_*.bsp; do
+  [ -f "$bsp" ] || continue
+  docker cp "$bsp" "$NAME":/xashds/cstrike/maps/"$(basename "$bsp")"
+  docker exec -u 0 "$NAME" chown 999:999 /xashds/cstrike/maps/"$(basename "$bsp")"
+done
 # Server runs as uid 1000 and writes <map>.bsp.ztmp here when a browser joins;
 # without write access it segfaults (README gotcha 8).
-docker exec -u 0 "$NAME" chmod 777 /xashds/cstrike/maps
+docker exec -u 0 "$NAME" sh -c 'mkdir -p /xashds/czero/maps; chmod 777 /xashds/cstrike/maps /xashds/czero/maps'
 # Cached navmesh (learned once; README gotcha 4). Must be world-readable, in cstrike/maps.
-if [ -f "$HERE/gamedata/maps/jev_duel.nav" ]; then
-  docker cp "$HERE/gamedata/maps/jev_duel.nav" "$NAME":/xashds/cstrike/maps/jev_duel.nav
-  docker exec -u 0 "$NAME" sh -c 'chown 999:999 /xashds/cstrike/maps/jev_duel.nav; chmod 644 /xashds/cstrike/maps/jev_duel.nav'
-fi
+for nav in "$HERE"/gamedata/maps/jev_*.nav; do
+  [ -f "$nav" ] || continue
+  docker cp "$nav" "$NAME":/xashds/cstrike/maps/"$(basename "$nav")"
+  docker cp "$nav" "$NAME":/xashds/czero/maps/"$(basename "$nav")"
+  docker exec -u 0 "$NAME" sh -c "chown 999:999 /xashds/cstrike/maps/$(basename "$nav"); chmod 644 /xashds/cstrike/maps/$(basename "$nav")"
+  docker exec -u 0 "$NAME" sh -c "chown 999:999 /xashds/czero/maps/$(basename "$nav"); chmod 644 /xashds/czero/maps/$(basename "$nav")"
+done
 # Docker Desktop sometimes skips the host-side UDP forward when a container is
 # recreated on the same ports. The page then loads but WebRTC never connects and
 # the client hangs on "Loading cached game files..." with no error.

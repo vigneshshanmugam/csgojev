@@ -13,10 +13,34 @@ import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { BOXES, PLAYER_SPAWN, ENEMY_HOLD, ENEMY_PEEK, EYE, HALF_WIDTH, LANE_M, blocked, collide, type Box } from '../../src/game/map.js';
+import { SPLIT_BOXES, SPLIT_EYE, SPLIT_HALF_WIDTH, SPLIT_HOLD, SPLIT_LANE_M, SPLIT_PEEK_L, SPLIT_PEEK_R, SPLIT_SPAWN } from '../../src/game/split.js';
 
 /** Units per metre. 1 GoldSrc unit ~= 1 inch. */
 const U = 39.37;
 const u = (m: number) => Math.round(m * U);
+const layoutName = (process.argv[2] ?? 'duel').replace(/^jev_/, '');
+if (!['duel', 'split'].includes(layoutName)) throw new Error('layout must be duel or split');
+const layout = layoutName === 'split'
+  ? {
+      map: 'jev_split',
+      boxes: SPLIT_BOXES,
+      spawn: SPLIT_SPAWN,
+      hold: SPLIT_HOLD,
+      peeks: [SPLIT_PEEK_L, SPLIT_PEEK_R],
+      eye: SPLIT_EYE,
+      halfWidth: SPLIT_HALF_WIDTH,
+      laneM: SPLIT_LANE_M,
+    }
+  : {
+      map: 'jev_duel',
+      boxes: BOXES,
+      spawn: PLAYER_SPAWN,
+      hold: ENEMY_HOLD,
+      peeks: [ENEMY_PEEK],
+      eye: EYE,
+      halfWidth: HALF_WIDTH,
+      laneM: LANE_M,
+    };
 
 const TEX = {
   floor: 'SandRoad',
@@ -65,8 +89,8 @@ function box(
 }
 
 /** By rank, not by absolute height: the shell is the tallest tier, the pillar the next. */
-const WALL_H = Math.max(...BOXES.map((b) => b.h));
-const PILLAR_H = Math.max(...BOXES.filter((b) => b.h < WALL_H).map((b) => b.h));
+const WALL_H = Math.max(...layout.boxes.map((b) => b.h));
+const PILLAR_H = Math.max(...layout.boxes.filter((b) => b.h < WALL_H).map((b) => b.h));
 
 function texFor(b: Box): { side: string; cap: string } {
   if (b.h === WALL_H) return { side: TEX.wall, cap: TEX.wall };
@@ -82,16 +106,16 @@ function ent(classname: string, kv: Record<string, string>): string {
 }
 
 // --- outer extents, straight from BOXES ---------------------------------
-const minX = u(Math.min(...BOXES.map((b) => b.x0)));
-const maxX = u(Math.max(...BOXES.map((b) => b.x1)));
-const minY = u(Math.min(...BOXES.map((b) => b.z0)));
-const maxY = u(Math.max(...BOXES.map((b) => b.z1)));
-const ceilZ = u(Math.max(...BOXES.map((b) => b.h)));
+const minX = u(Math.min(...layout.boxes.map((b) => b.x0)));
+const maxX = u(Math.max(...layout.boxes.map((b) => b.x1)));
+const minY = u(Math.min(...layout.boxes.map((b) => b.z0)));
+const maxY = u(Math.max(...layout.boxes.map((b) => b.z1)));
+const ceilZ = u(Math.max(...layout.boxes.map((b) => b.h)));
 
 const brushes: string[] = [
   box(minX, minY, -SHELL, maxX, maxY, 0, TEX.floor),
   box(minX, minY, ceilZ, maxX, maxY, ceilZ + SHELL, TEX.ceiling),
-  ...BOXES.map((b) => {
+  ...layout.boxes.map((b) => {
     const t = texFor(b);
     return box(u(b.x0), u(b.z0), 0, u(b.x1), u(b.z1), u(b.h), t.side, t.cap);
   }),
@@ -110,27 +134,26 @@ const worldspawn = [
 // --- entities -----------------------------------------------------------
 // CT (info_player_start) at the prototype player spawn, facing downrange (-y).
 // T (info_player_deathmatch) at the enemy hold/peek end, facing +y.
-const ctY = u(PLAYER_SPAWN.z);
-const tY = u(ENEMY_HOLD.z);
-const lim = Math.floor(HALF_WIDTH * U) - HULL;
+const ctY = u(layout.spawn.z);
+const tY = u(layout.hold.z);
+const lim = Math.floor(layout.halfWidth * U) - HULL;
 const clampX = (x: number) => Math.max(-lim, Math.min(lim, x));
-// The zBot spawns on these. The prototype spawn is tucked behind the player-cover
-// crate, so a zBot that is held there (jev_zhold) is never seen from the peek
-// spot and every round on it runs out as a draw. Start at the first x where the
-// whole hull is in view of the peek spot.
+// The zBot spawns on these. Start at the first x where the whole hull is in
+// view of at least one peek spot, or a held zBot can create uninformative draws.
 const inView = (x: number) =>
-  [x - HULL, x + HULL].every((e) => !blocked(ENEMY_PEEK.x, ENEMY_PEEK.z, e / U, PLAYER_SPAWN.z));
-let ctRight = clampX(u(PLAYER_SPAWN.x));
+  [x - HULL, x + HULL].every((e) => layout.peeks.some((p) => !blocked(p.x, p.z, e / U, layout.spawn.z, layout.boxes)));
+let ctRight = clampX(u(layout.spawn.x));
 while (!inView(ctRight)) {
   if (--ctRight < -lim) throw new Error('no CT spawn x is in view of the peek spot');
 }
 const ctXs = [0, 1, 2, 3].map((i) => clampX(ctRight - i * SPAWN_GAP));
-// The two the duel is built around first, then fillers in the gap between them.
-const tXs = [u(ENEMY_HOLD.x), u(ENEMY_PEEK.x), clampX(u(ENEMY_HOLD.x) + SPAWN_GAP), clampX(u(ENEMY_PEEK.x) + SPAWN_GAP)];
+// The spots the duel is built around first, then fillers in the gap between them.
+const tSeeds = [layout.hold.x, ...layout.peeks.map((p) => p.x), layout.hold.x + SPAWN_GAP / U];
+const tXs = tSeeds.slice(0, 4).map((x) => clampX(u(x)));
 
 // A spawn inside a brush is a map that boots and then kills whoever joins.
 for (const [x, y] of [...ctXs.map((x) => [x, ctY]), ...tXs.map((x) => [x, tY])]) {
-  const m = collide(x / U, y / U, HULL / U);
+  const m = collide(x / U, y / U, HULL / U, layout.boxes);
   if (Math.abs(m.x - x / U) > 1e-9 || Math.abs(m.z - y / U) > 1e-9) {
     throw new Error(`spawn ${x} ${y} is inside geometry; it would be pushed to ${u(m.x)} ${u(m.z)}`);
   }
@@ -147,14 +170,14 @@ for (let y = maxY - 150; y > minY; y -= 250) {
   entities.push(ent('light', { origin: `0 ${Math.round(y)} ${ceilZ - 24}`, _light: '255 238 210 260' }));
 }
 
-const out = join(dirname(fileURLToPath(import.meta.url)), 'jev_duel.map');
+const out = join(dirname(fileURLToPath(import.meta.url)), `${layout.map}.map`);
 writeFileSync(out, entities.join('\n') + '\n');
 
-const laneLen = u(LANE_M);
-const coverH = BOXES.filter((b) => b.h < WALL_H).map((b) => u(b.h));
+const laneLen = u(layout.laneM);
+const coverH = layout.boxes.filter((b) => b.h < WALL_H).map((b) => u(b.h));
 console.log(`wrote ${out}`);
 console.log(`  units/metre      ${U}`);
-console.log(`  lane x           ${minX}..${maxX}  (interior width ${u(2 * HALF_WIDTH)} u)`);
+console.log(`  lane x           ${minX}..${maxX}  (interior width ${u(2 * layout.halfWidth)} u)`);
 console.log(`  lane y           ${minY}..${maxY}`);
 console.log(`  ceiling          ${ceilZ} u`);
 console.log(`  spawn -> enemy   ${laneLen} u  (~${(laneLen / 250).toFixed(1)} s at 250 u/s)`);
