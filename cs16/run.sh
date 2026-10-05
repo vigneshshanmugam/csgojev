@@ -4,6 +4,7 @@
 #   cs16/run.sh              # container cs16-jev, HTTP :27036, WebRTC :27038
 #   cs16/run.sh say "cmd"    # send one server-console command
 #   SLOT=1 cs16/run.sh       # a second, isolated server (see slot.sh)
+#   ADDONS=/dir cs16/run.sh  # mount another addons dir (a plugin build under test)
 #
 # The map is docker-cp'd, never bind-mounted (README gotcha 8). The console is a FIFO
 # fed to `docker attach` (README gotcha 11); it must stay open or the engine sees EOF.
@@ -36,7 +37,7 @@ docker run -d -i --name "$NAME" --platform linux/386 \
   -e IP=127.0.0.1 -e PORT="$PORT" \
   -p "$HTTP":27016 -p "$PORT":"$PORT"/tcp -p "$PORT":"$PORT"/udp -p 127.0.0.1:"$INTENT":27101/udp \
   -v "$HERE/logs/$NAME":/xashds/cstrike/logs \
-  -v "$HERE/overlay/addons":/xashds/cstrike/addons \
+  -v "${ADDONS:-$HERE/overlay/addons}":/xashds/cstrike/addons \
   -v "$HERE/overlay/liblist.gam":/xashds/cstrike/liblist.gam:ro \
   -v "$HERE/gamedata/BotProfile.db":/xashds/cstrike/BotProfile.db:ro \
   "$IMAGE" "+map de_dust2" "+maxplayers 16" >/dev/null

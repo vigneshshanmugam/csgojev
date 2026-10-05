@@ -211,6 +211,51 @@ static int Cmd_Argc()
 	RETURN_META_VALUE(MRES_IGNORED, 0);
 }
 
+// --- steering a stock zBot ---------------------------------------------------
+// zBot owns its navigation, aim and trigger finger inside cs.so. The one thing
+// every zBot must do each frame is call pfnRunPlayerMove, so that call is the
+// handle: a Metamod hook can pass the angles and buttons through (it still aims
+// and fires) and replace only the movement. `jev_zhold 1` zeroes the zBot's
+// forward and side move, which pins it where it stands; `0` releases it.
+static bool g_zHold = false;
+static int g_zMoves = 0, g_zHeld = 0;
+
+static bool IsZBot(edict_t *e)
+{
+	return e && !FNullEnt(e) && e != g_bot && (e->v.flags & FL_FAKECLIENT);
+}
+
+static void RunPlayerMove(edict_t *fakeclient, const float *viewangles, float forwardmove, float sidemove,
+	float upmove, unsigned short buttons, byte impulse, byte msec)
+{
+	if (!IsZBot(fakeclient))
+		RETURN_META(MRES_IGNORED);
+	g_zMoves++;
+	if (!g_zHold)
+		RETURN_META(MRES_IGNORED);
+	g_zHeld++;
+	(*g_engfuncs.pfnRunPlayerMove)(fakeclient, viewangles, 0.0f, 0.0f, upmove, buttons, impulse, msec);
+	RETURN_META(MRES_SUPERCEDE);
+}
+
+static void cmd_jev_zhold()
+{
+	if (CMD_ARGC() > 1)
+		g_zHold = atoi(CMD_ARGV(1)) != 0;
+	int n = 0;
+	for (int i = 1; i <= gpGlobals->maxClients; i++) {
+		edict_t *p = INDEXENT(i);
+		if (!IsZBot(p) || p->free)
+			continue;
+		n++;
+		Say("[jev] zbot %d: origin=(%.1f %.1f %.1f) speed=%.0f angles=(%.0f %.0f) hp=%.0f weapon=%s buttons=%d",
+			i, p->v.origin.x, p->v.origin.y, p->v.origin.z, p->v.velocity.Length2D(),
+			p->v.v_angle.x, p->v.v_angle.y, p->v.health,
+			p->v.weaponmodel ? STRING(p->v.weaponmodel) : "none", (int)p->v.button);
+	}
+	Say("[jev] zhold=%d zbots=%d moves=%d held=%d", g_zHold ? 1 : 0, n, g_zMoves, g_zHeld);
+}
+
 // The game DLL's GiveNamedItem is not reachable from a Metamod plugin, so the
 // weapon entity is spawned and touched against the bot instead.
 static void GiveItem(edict_t *player, const char *classname)
@@ -1181,6 +1226,7 @@ C_DLLEXPORT int GetEngineFunctions(enginefuncs_t *pengfuncsFromEngine, int *inte
 	gEngineFunctionTable.pfnCmd_Argc = Cmd_Argc;
 	gEngineFunctionTable.pfnGetGameDir = GetGameDir;
 	gEngineFunctionTable.pfnPrecacheModel = PrecacheModel;
+	gEngineFunctionTable.pfnRunPlayerMove = RunPlayerMove;
 	memcpy(pengfuncsFromEngine, &gEngineFunctionTable, sizeof(enginefuncs_t));
 	return TRUE;
 }
@@ -1223,6 +1269,7 @@ C_DLLEXPORT int Meta_Attach(PLUG_LOADTIME now, META_FUNCTIONS *pFunctionTable, m
 	REG_SVR_COMMAND("jev_tune", cmd_jev_tune);
 	REG_SVR_COMMAND("jev_watch", cmd_jev_watch);
 	REG_SVR_COMMAND("jev_burst", cmd_jev_burst);
+	REG_SVR_COMMAND("jev_zhold", cmd_jev_zhold);
 	Say("[jev] plugin attached: jev_spawn, jev_where, jev_give, jev_cmd, jev_spoof, "
 		"jev_bridge, jev_duel, jev_stop, jev_report, jev_tune");
 	return TRUE;
