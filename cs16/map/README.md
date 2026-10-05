@@ -80,5 +80,11 @@ Useful landmarks:
 
 Four `info_player_start` (CT) at the player end facing downrange, four
 `info_player_deathmatch` (T) at the enemy end on the hold and peek spots, and a
-row of `light` entities under the ceiling. No buy zones, no objectives —
-weapons are given programmatically by the plugin.
+row of `light` entities under the ceiling.
+
+The CT row starts at the first x where a whole player hull is in view of the
+enemy peek spot (45 units), not at the prototype player spawn (91 units). That
+spawn is behind the player-cover crate, so a zBot held there with `jev_zhold` was
+never seen and its rounds ran out as draws (one round in four).
+
+No buy zones, no objectives — weapons are given programmatically by the plugin.

@@ -12,7 +12,7 @@
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { BOXES, PLAYER_SPAWN, ENEMY_HOLD, ENEMY_PEEK, EYE, HALF_WIDTH, LANE_M, collide, type Box } from '../../src/game/map.js';
+import { BOXES, PLAYER_SPAWN, ENEMY_HOLD, ENEMY_PEEK, EYE, HALF_WIDTH, LANE_M, blocked, collide, type Box } from '../../src/game/map.js';
 
 /** Units per metre. 1 GoldSrc unit ~= 1 inch. */
 const U = 39.37;
@@ -112,9 +112,19 @@ const worldspawn = [
 // T (info_player_deathmatch) at the enemy hold/peek end, facing +y.
 const ctY = u(PLAYER_SPAWN.z);
 const tY = u(ENEMY_HOLD.z);
-const lim = u(HALF_WIDTH) - HULL;
+const lim = Math.floor(HALF_WIDTH * U) - HULL;
 const clampX = (x: number) => Math.max(-lim, Math.min(lim, x));
-const ctXs = [0, 1, 2, 3].map((i) => clampX(u(PLAYER_SPAWN.x) - i * SPAWN_GAP));
+// The zBot spawns on these. The prototype spawn is tucked behind the player-cover
+// crate, so a zBot that is held there (jev_zhold) is never seen from the peek
+// spot and every round on it runs out as a draw. Start at the first x where the
+// whole hull is in view of the peek spot.
+const inView = (x: number) =>
+  [x - HULL, x + HULL].every((e) => !blocked(ENEMY_PEEK.x, ENEMY_PEEK.z, e / U, PLAYER_SPAWN.z));
+let ctRight = clampX(u(PLAYER_SPAWN.x));
+while (!inView(ctRight)) {
+  if (--ctRight < -lim) throw new Error('no CT spawn x is in view of the peek spot');
+}
+const ctXs = [0, 1, 2, 3].map((i) => clampX(ctRight - i * SPAWN_GAP));
 // The two the duel is built around first, then fillers in the gap between them.
 const tXs = [u(ENEMY_HOLD.x), u(ENEMY_PEEK.x), clampX(u(ENEMY_HOLD.x) + SPAWN_GAP), clampX(u(ENEMY_PEEK.x) + SPAWN_GAP)];
 
