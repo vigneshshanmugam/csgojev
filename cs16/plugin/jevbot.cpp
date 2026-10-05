@@ -76,6 +76,9 @@ static float g_enemyArmAt = 0.0f;
 // about the loadout. Set with `jev_weapon <weapon_x> [ammo_y]`.
 static char g_weapon[32] = "weapon_awp";
 static char g_ammo[32] = "ammo_338magnum";
+// The zBot's own weapon when it should differ from Jev's bot; empty means the same.
+static char g_enemyWeapon[32] = "";
+static char g_enemyAmmo[32] = "";
 static float g_lastSelect = 0.0f;
 static float g_armedAt = 0.0f;
 
@@ -308,15 +311,17 @@ static void KeepWeaponOut()
 }
 
 // No buy zone on this map, so the zBot would hold a pistol. It gets the same
-// weapon as Jev's bot.
+// weapon as Jev's bot unless `jev_enemy_weapon` set its own.
 static void ArmEnemy(edict_t *enemy)
 {
-	if (!g_weapon[0])
+	const char *weapon = g_enemyWeapon[0] ? g_enemyWeapon : g_weapon;
+	const char *ammo = g_enemyWeapon[0] ? g_enemyAmmo : g_ammo;
+	if (!weapon[0])
 		return;
-	GiveItem(enemy, g_weapon);
-	GiveItem(enemy, g_ammo);
-	GiveItem(enemy, g_ammo);
-	FakeClientCommand(enemy, g_weapon, "", "");
+	GiveItem(enemy, weapon);
+	GiveItem(enemy, ammo);
+	GiveItem(enemy, ammo);
+	FakeClientCommand(enemy, weapon, "", "");
 }
 
 // ---------------------------------------------------------------- perception
@@ -1093,9 +1098,24 @@ static void cmd_jev_arm_enemy()
 		strncpy(g_ammo, CMD_ARGV(2), sizeof(g_ammo) - 1);
 		g_ammo[sizeof(g_ammo) - 1] = '\0';
 	}
+	g_enemyWeapon[0] = '\0';
 	if (g_bot && !FNullEnt(g_bot))
 		ArmBot();
 	Say("[jev] both sides use %s / %s", g_weapon, g_ammo);
+}
+
+// Arms the zBot differently from Jev's bot, from its next spawn on. Applies to
+// zBots added after it: one already holding a primary keeps it.
+static void cmd_jev_enemy_weapon()
+{
+	if (CMD_ARGC() > 1) {
+		strncpy(g_enemyWeapon, CMD_ARGV(1), sizeof(g_enemyWeapon) - 1);
+		g_enemyWeapon[sizeof(g_enemyWeapon) - 1] = '\0';
+		strncpy(g_enemyAmmo, AmmoFor(g_enemyWeapon), sizeof(g_enemyAmmo) - 1);
+		g_enemyAmmo[sizeof(g_enemyAmmo) - 1] = '\0';
+	}
+	Say("[jev] enemy uses %s / %s, Jev's bot %s", g_enemyWeapon[0] ? g_enemyWeapon : g_weapon,
+		g_enemyWeapon[0] ? g_enemyAmmo : g_ammo, g_weapon);
 }
 
 static void cmd_jev_tune()
@@ -1266,6 +1286,7 @@ C_DLLEXPORT int Meta_Attach(PLUG_LOADTIME now, META_FUNCTIONS *pFunctionTable, m
 	REG_SVR_COMMAND("jev_report", cmd_jev_report);
 	REG_SVR_COMMAND("jev_arm_enemy", cmd_jev_arm_enemy);
 	REG_SVR_COMMAND("jev_weapon", cmd_jev_arm_enemy);
+	REG_SVR_COMMAND("jev_enemy_weapon", cmd_jev_enemy_weapon);
 	REG_SVR_COMMAND("jev_tune", cmd_jev_tune);
 	REG_SVR_COMMAND("jev_watch", cmd_jev_watch);
 	REG_SVR_COMMAND("jev_burst", cmd_jev_burst);
