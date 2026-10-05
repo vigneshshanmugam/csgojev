@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { cohenH, fisher, readRun, report, roundsNeeded, wilson } from './analyze';
+import { cohenH, fisher, mergeRuns, readRun, report, roundsNeeded, wilson } from './analyze';
 import type { Situation } from './brains';
 
 describe('statistics', () => {
@@ -70,5 +70,27 @@ describe('report', () => {
     expect(md).toContain('| rule | peek | 2 | holding→peeking 50%, no change 50% |');
     expect(md).toContain('**holding · footsteps**');
     expect(md).toContain('peek 100% (won 50%)');
+  });
+
+  it('merges one brain logged on several slots, keeping their rounds apart', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jev-merge-'));
+    const log = (slot: number, result: string) =>
+      [
+        { t: 'meta', brain: 'jev', slot },
+        { t: 'round_start', round: 1, at: 0 },
+        { t: 'decision', round: 1, at: 10, ms: 5, situation, options: ['enemy.peek', 'noop'], choice: 'enemy.peek', confidence: 1, cached: false, sent: true },
+        { t: 'round_end', round: 1, result, at: 1000 },
+      ]
+        .map((l) => JSON.stringify(l))
+        .join('\n');
+    writeFileSync(join(dir, 'jev-s3.jsonl'), log(3, 'win'));
+    writeFileSync(join(dir, 'jev-s4.jsonl'), log(4, 'loss'));
+
+    const [run] = mergeRuns([readRun(join(dir, 'jev-s3.jsonl'), 0), readRun(join(dir, 'jev-s4.jsonl'), 100_000)]);
+    expect(run.rounds).toHaveLength(2);
+    expect(run.decisions.map((d) => d.result)).toEqual(['win', 'loss']);
+    const md = report([run]);
+    expect(md).toContain('| jev | 2 | 1-1-0 | 50% |');
+    expect(md).toContain('| jev | 1-0 | 0-1 |');
   });
 });

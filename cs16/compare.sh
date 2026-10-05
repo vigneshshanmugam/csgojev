@@ -5,6 +5,7 @@
 #   cs16/compare.sh [rounds] [brains]
 #   cs16/compare.sh 50 "jev rule random"
 #   RUN_DIR=cs16/runs/x SLOT=4 cs16/compare.sh 50 rule   # one brain per slot, in parallel
+#   cs16/compare-balanced.sh 7                            # every brain on every slot (Latin square)
 #
 # Starts its own sidecar per brain, so do not run `pnpm sidecar` on this slot.
 # Defaults to SLOT=3 to stay clear of servers people play on. Jev needs
@@ -59,12 +60,14 @@ fi
 
 for brain in $BRAINS; do
   stop_sidecar
-  (cd "$ROOT" && BRAIN="$brain" RUN_LOG="$RUN_DIR/$brain.jsonl" RUN_META="$META" \
-    exec "$ROOT/node_modules/.bin/tsx" cs16/sidecar/src/main.ts) > "$RUN_DIR/$brain.sidecar.log" 2>&1 &
+  # Per slot, so slots running in parallel into one RUN_DIR never share a file.
+  RUN="$RUN_DIR/$brain-s$SLOT"
+  (cd "$ROOT" && BRAIN="$brain" RUN_LOG="$RUN.jsonl" RUN_META="$META" \
+    exec "$ROOT/node_modules/.bin/tsx" cs16/sidecar/src/main.ts) > "$RUN.sidecar.log" 2>&1 &
   SIDECAR_PID=$!
-  for _ in $(seq 1 30); do grep -q 'listening' "$RUN_DIR/$brain.sidecar.log" 2>/dev/null && break; sleep 1; done
-  if ! grep -q 'listening' "$RUN_DIR/$brain.sidecar.log"; then
-    echo "compare: $brain sidecar did not start:" >&2; cat "$RUN_DIR/$brain.sidecar.log" >&2; exit 1
+  for _ in $(seq 1 30); do grep -q 'listening' "$RUN.sidecar.log" 2>/dev/null && break; sleep 1; done
+  if ! grep -q 'listening' "$RUN.sidecar.log"; then
+    echo "compare: $brain sidecar did not start:" >&2; cat "$RUN.sidecar.log" >&2; exit 1
   fi
 
   say "jev_bridge $BRIDGE_HOST $OBS"

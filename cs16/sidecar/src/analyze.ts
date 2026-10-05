@@ -35,7 +35,7 @@ type Move = Extract<Line, { t: 'move' }>;
 export interface BrainRun {
   brain: string;
   meta: Record<string, unknown>;
-  rounds: Array<{ round: number; result: 'win' | 'loss' | 'draw'; seconds: number }>;
+  rounds: Array<{ round: number; slot: string; result: 'win' | 'loss' | 'draw'; seconds: number }>;
   decisions: Decision[];
   moves: Move[];
 }
@@ -91,7 +91,8 @@ export function roundsNeeded(p1: number, p2: number): number {
 
 // ------------------------------------------------------------------ reading
 
-export function readRun(path: string): BrainRun {
+/** `offset` keeps round numbers from different files apart once merged. */
+export function readRun(path: string, offset = 0): BrainRun {
   const lines = readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as Line);
   const meta = (lines.find((l) => l.t === 'meta') ?? { brain: basename(path, '.jsonl') }) as Record<string, unknown>;
   const starts = new Map<number, number>();
@@ -103,14 +104,30 @@ export function readRun(path: string): BrainRun {
   // Only rounds the duel scored: free-play round starts never get a round_end.
   const decisions = lines
     .filter((l): l is Extract<Line, { t: 'decision' }> => l.t === 'decision' && results.has(l.round) && !!l.situation && !!l.choice)
-    .map((d) => ({ ...d, result: results.get(d.round)!.result }) as Decision);
+    .map((d) => ({ ...d, round: d.round + offset, result: results.get(d.round)!.result }) as Decision);
+  const slot = meta.slot === undefined ? '-' : String(meta.slot);
   return {
     brain: String(meta.brain),
     meta,
-    rounds: [...results].map(([round, r]) => ({ round, ...r })),
+    rounds: [...results].map(([round, r]) => ({ round: round + offset, slot, ...r })),
     decisions,
-    moves: lines.filter((l): l is Move => l.t === 'move' && results.has(l.round)),
+    moves: lines.filter((l): l is Move => l.t === 'move' && results.has(l.round)).map((m) => ({ ...m, round: m.round + offset })),
   };
+}
+
+/** One run per brain: a balanced comparison logs each brain once per slot. */
+export function mergeRuns(runs: BrainRun[]): BrainRun[] {
+  const byBrain = new Map<string, BrainRun>();
+  for (const r of runs) {
+    const into = byBrain.get(r.brain);
+    if (!into) byBrain.set(r.brain, { ...r, rounds: [...r.rounds], decisions: [...r.decisions], moves: [...r.moves] });
+    else {
+      into.rounds.push(...r.rounds);
+      into.decisions.push(...r.decisions);
+      into.moves.push(...r.moves);
+    }
+  }
+  return [...byBrain.values()];
 }
 
 // ------------------------------------------------------------------ report
@@ -165,6 +182,25 @@ export function report(runs: BrainRun[]): string {
     ),
     '',
   );
+
+  const slots = [...new Set(runs.flatMap((r) => r.rounds.map((x) => x.slot)))].sort();
+  if (slots.length > 1) {
+    out.push('## By slot', '');
+    out.push('Wins-losses per brain on each server. A balanced run gives every brain every slot.', '');
+    out.push(
+      table(
+        ['brain', ...slots.map((s) => `slot ${s}`)],
+        runs.map((r) => [
+          r.brain,
+          ...slots.map((s) => {
+            const here = r.rounds.filter((x) => x.slot === s);
+            return here.length ? `${here.filter((x) => x.result === 'win').length}-${here.filter((x) => x.result === 'loss').length}` : '-';
+          }),
+        ]),
+      ),
+      '',
+    );
+  }
 
   const jev = runs.find((r) => r.brain === 'jev');
   if (jev && jev.rounds.length) {
@@ -317,9 +353,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const dir = process.argv[2];
   if (!dir) throw new Error('usage: analyze.ts <run dir>');
   const order = ['jev', 'rule', 'rush', 'random', 'mock'];
-  const runs = readdirSync(dir)
-    .filter((f) => f.endsWith('.jsonl'))
-    .map((f) => readRun(join(dir, f)))
-    .sort((a, b) => order.indexOf(a.brain) - order.indexOf(b.brain));
+  const runs = mergeRuns(
+    readdirSync(dir)
+      .filter((f) => f.endsWith('.jsonl'))
+      .sort()
+      .map((f, i) => readRun(join(dir, f), i * 100_000)),
+  ).sort((a, b) => order.indexOf(a.brain) - order.indexOf(b.brain));
   console.log(report(runs));
 }
