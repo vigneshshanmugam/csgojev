@@ -1,6 +1,6 @@
 # csgojev
 
-Jev plays Counter-Strike 1.6. It takes the AWPer's seat in a 1v1 against the game's own zBot, on a small map built for the duel, and it wins most of the rounds.
+Jev plays Counter-Strike 1.6. It takes the AWPer's seat in a 1v1 against the game's own zBot, on a small map built for the duel, and it wins most of the rounds. Whether Jev's decisions are the reason is a separate question, and [Does Jev help?](#does-jev-help) answers it with what we measured so far.
 
 Jev is TypeSafe's System One model: a non-generative model that returns calibrated probability distributions over a closed set of choices. It does not write text and it does not aim. In this repo it makes one kind of call, over and over, at about 95ms: given what the bot can sense right now, which of the legal tactical moves should it take next?
 
@@ -43,7 +43,7 @@ Jev never moves the bot and never aims, so a slow brain sits on top of a fast ga
 
 The machine and the Jev agent (`createJevLogic`) come from [`@xstate/jev`](packages/jev/README.md), which lives in this repo.
 
-## Results
+## Results against the stock zBot
 
 Jev wins out of 24 rounds per cell, same weapon on both sides:
 
@@ -55,7 +55,42 @@ Jev wins out of 24 rounds per cell, same weapon on both sides:
 | 3 Expert | 16 | 13 |
 | total | 76/96 | 60/96 |
 
-Decision latency is a median of about 95ms (max 277ms over 18 live requests). With placeholder engine-side aiming, before Jev was driving, the same bot lost 2 to 10 against Easy, so that is the baseline these numbers beat. At n=24 per cell the margin is about ±18pp: the trend holds, single cells do not. The rifle path is untuned.
+Decision latency is a median of about 100ms (p90 about 160 to 200ms). With placeholder engine-side aiming, before Jev was driving, the same bot lost 2 to 10 against Easy. At n=24 per cell the margin is about ±18pp, so the trend holds and single cells do not. The rifle path is untuned.
+
+## Does Jev help?
+
+Not shown yet, and not ruled out. Jev reaches the level of a tuned script without any hand-written thresholds, but the duel is too coarse to tell it apart from one.
+
+To isolate Jev, `cs16/compare.sh` swaps only the decision-maker (`cs16/sidecar/src/brains.ts`) while the body, machine, map and zBot stay fixed:
+
+- `rule`: a hand-written AWPer with fixed thresholds.
+- `rush`: peek at once, otherwise `rule`.
+- `random`: a uniform pick among the legal moves.
+- `jev`: the real model.
+
+`compare-balanced.sh` runs every brain on every server slot, so a slow server cannot favour one brain. `compare-sequential.sh` adds passes of 100 rounds per brain and stops by the rule written into `analyze.ts` (Haybittle-Peto efficacy, non-binding futility, two-sided 0.05 at the cap). Each run folder keeps its logs, `report.md` and a pre-registration.
+
+| Run | Setup | Result |
+| --- | --- | --- |
+| Pilot, 20 rounds each | AWP vs AWP, Hard | jev 15-5, rush 13-7, rule 7-13, random 7-13 |
+| Balanced, 21 rounds each | AWP vs AWP, Expert, three slots | jev 13-8, rule 12-9, rush 11-10 |
+| Lever check, 100 rounds each | AWP vs M4A1, Expert, four slots | rush 56, rule 55 (3 draws) |
+
+What the runs show:
+
+- The pilot's gap between Jev and `rule` (p=0.025) disappeared once brains were balanced across slots. It was mostly a slot effect.
+- In the balanced run, Jev against `rush` is +9.5 points (p=0.76) and against `rule` is +4.8 points (p=1.0). Both are noise, and detecting a gap that size would take over 400 rounds per brain.
+- In the lever check, `rush` and `rule` tied (z=0.14), so the opening policy is not a lever in this duel. That run stopped for futility at the first look, which rules out gaps of about 15 points or more, not smaller ones.
+- Jev opens like `rush`: it peeks from cover every round. Where it departs from the rules it does so at 30 to 45% confidence.
+- Falling back while hurt comes up in about 5% of rounds, so it cannot move the overall win rate by more than about 5 points.
+
+What is not tested:
+
+- Jev against the best script at a round count that can see a small edge.
+- Jev steering the shipped zBot itself. A spike showed that `jev_zhold` can pin a zBot while it keeps aiming and firing. The design for the full experiment is in [`cs16/STEERING.md`](cs16/STEERING.md), and its `stock` arm may hit the same lack of a lever.
+- Cross-round adaptation. Jev sees each situation fresh and is not told how earlier rounds went. A `jevmem` brain exists but is parked.
+
+The next step is to change the game so choices matter more: a mixed schedule of rushing and held zBots, or a richer duel with more peek lines.
 
 ## Two places to watch it
 
@@ -85,6 +120,9 @@ cs16/
   map/               generates jev_duel.map from src/game/map.ts and compiles the .bsp
   overlay/ gamedata/ Metamod config, authored BotProfile.db, cached navmesh
   duel.sh bench.sh   full match, and difficulty sweeps
+  compare*.sh        brain comparisons: single, balanced across slots, sequential with a stopping rule
+  runs/              logs, reports and pre-registrations per comparison (gitignored)
+  STEERING.md        design for steering a stock zBot with Jev
 ```
 
 ## Running it
@@ -104,6 +142,7 @@ cs16/plugin/build.sh           # build the plugin (i386 container)
 cs16/duel.sh bots 10 0         # live match: 10 rounds vs zBot, difficulty 0-3
 cs16/duel.sh human             # join from the browser as CT
 cs16/bench.sh 24 "0 1 2 3"     # difficulty sweep
+cs16/compare-sequential.sh rush rule 100 400 "3 4 6 7"   # brain comparison with a stopping rule
 ```
 
 The CS side needs Docker and a populated `cs16/vendor/` (metamod-p, sdhlt, WADs). `SLOT=n` runs a second isolated server on its own ports; pair it with `SLOT=n pnpm sidecar`.
