@@ -32,6 +32,8 @@ export interface EnemyTiming {
    * Shown to Jev when given, so it can drop a plan that keeps losing.
    */
   memory?: () => readonly string[];
+  /** When set, the bot chooses which lane to peek instead of a single shared peek. */
+  sides?: readonly ['left', 'right'];
 }
 
 /**
@@ -58,6 +60,12 @@ export interface EnemyContext {
   onTarget: number;
   /** Seconds left in the round. The attacker has to come to you before it runs out. */
   roundLeft: number;
+  /** Which side the bot is currently contesting, on split-lane maps. */
+  side?: 'left' | 'right';
+  /** Side footsteps came from, when the engine can tell. */
+  footstepsFrom?: 'left' | 'right' | null;
+  /** Where the player was last seen, when the engine can tell. */
+  lastSeenSide?: 'left' | 'right' | null;
 }
 
 export const enemyInitial: EnemyContext = {
@@ -78,6 +86,8 @@ export const enemyInitial: EnemyContext = {
 
 const events = {
   'enemy.peek': z.object({}).describe('Swing out from behind the pillar into the lane. Takes 0.55s, and you are moving and exposed the whole way, so you cannot shoot accurately until you stop.'),
+  'enemy.peekLeft': z.object({}).describe('Swing out from behind the pillar to contest the left lane. Takes 0.55s, and you are moving and exposed the whole way, so you cannot shoot accurately until you stop.'),
+  'enemy.peekRight': z.object({}).describe('Swing out from behind the pillar to contest the right lane. Takes 0.55s, and you are moving and exposed the whole way, so you cannot shoot accurately until you stop.'),
   'enemy.counterStrafe': z.object({}).describe('Stop dead where you are, part way out. Less of you is exposed than a full swing, and you are accurate at once.'),
   'enemy.shoot': z.object({}).describe('Fire the AWP at the player. One hit kills. Then a 1.5s bolt cycle during which you cannot shoot.'),
   'enemy.fallBack': z.object({}).describe('Step back behind the pillar, out of sight and safe.'),
@@ -119,6 +129,15 @@ const MEMORY_SYS = [
   'Opponents differ: some push into you, some hold their own angle and punish an early peek. If a plan keeps losing, change it.',
 ].join(' ');
 
+const SPLIT_SYS = [
+  'You are a pro CS AWPer holding the middle of a two-lane angle. A human rifler can come through the left lane or the right lane.',
+  'One AWP hit kills them. Three of their rifle body shots kill you, so every second you spend exposed is a risk.',
+  'Shots you take while moving miss; stationary shots hit. After you fire you cannot shoot for 1.5 seconds.',
+  'Behind the pillar you are safe but blind, and you cannot win from there. A peek contests only one lane at a time.',
+  'If you pick the empty lane, the rifler in the other lane keeps closing distance. If the round timer runs out you have thrown the round by never contesting.',
+  'Choose when to leave cover, which lane to contest, when to stop, when to shoot, and when to get back behind cover.',
+].join(' ');
+
 /**
  * Distance in 2m steps: enough for a tactical read, coarse enough that the
  * request is stable. 5m was right for the 68m lane; on a 23m one it left only
@@ -134,6 +153,7 @@ export function createEnemyMachine(client: JevClient, timing: EnemyTiming = {}) 
   const boltMs = timing.boltMs ?? BOLT_MS;
   const aimSeconds = timing.aimSeconds ?? 0;
   const aimSettled = timing.aimSettledSeconds ?? aimSeconds * 2;
+  const split = !!timing.sides;
   /** Four readings, not a number that never stops changing: the request stays stable. */
   const aimOf = (onTarget: number) =>
     onTarget <= 0 ? 'not on them' : onTarget < aimSeconds ? 'still settling, no shot yet'
@@ -157,12 +177,27 @@ export function createEnemyMachine(client: JevClient, timing: EnemyTiming = {}) 
     context.playerVisible && context.onTarget >= aimSeconds
       ? { target: 'cycling', context: { ...context, shots: context.shots + 1 } }
       : undefined;
+  const fallBack = ({ context }: { context: EnemyContext }) => ({ target: 'holding', context: { ...context, side: undefined } });
+  const peekSide = (side: 'left' | 'right', target: 'peekingLeft' | 'peekingRight') =>
+    ({ context }: { context: EnemyContext }) => ({ target, context: { ...context, side } });
+  const peekingState = {
+    description: 'Swinging out into a lane. Exposed and moving, so you cannot hit anything yet.',
+    on: {
+      ...common,
+      'enemy.counterStrafe': { target: 'scoped' },
+      'enemy.shoot': shoot,
+      'enemy.fallBack': fallBack,
+      'world.arrived': { target: 'scoped' },
+    },
+    // The swing finishes on its own: fully out, and standing still.
+    after: { [peekMs]: { target: 'scoped' } },
+  } as const;
 
   return setup({
     actors: {
       jev: createJevLogic({
         events: 'enemy.*',
-        instructions: [SYS, aimSeconds > 0 ? AIM_SYS : '', timing.memory ? MEMORY_SYS : ''].filter(Boolean).join(' '),
+        instructions: [split ? SPLIT_SYS : SYS, aimSeconds > 0 ? AIM_SYS : '', timing.memory ? MEMORY_SYS : ''].filter(Boolean).join(' '),
         noop: 'stay behind the pillar and wait. Nothing can hit you, but you see nothing, you cannot shoot, and the rifler walks a few metres closer to clearing your angle.',
         client,
         lookahead: true,
@@ -190,6 +225,11 @@ export function createEnemyMachine(client: JevClient, timing: EnemyTiming = {}) 
             yourHp: c.hp,
             playerHp: c.playerHp,
             roundSecondsLeft: Math.round(c.roundLeft / 5) * 5,
+            ...(split ? {
+              side: c.side ?? 'behind cover',
+              footstepsFrom: c.footstepsFrom ?? 'none',
+              playerLastSeenOn: c.lastSeenSide ?? (c.sinceSeen < 0 ? 'never seen this round' : 'unknown'),
+            } : {}),
             ...(timing.memory ? { earlierRounds: timing.memory().length ? timing.memory() : 'none yet' } : {}),
           };
         },
@@ -203,29 +243,26 @@ export function createEnemyMachine(client: JevClient, timing: EnemyTiming = {}) 
     states: {
       holding: {
         description: 'Behind the pillar, out of sight, AWP ready. Nothing can hit you here.',
-        on: { ...common, 'enemy.peek': { target: 'peeking' } },
+        on: split
+          ? {
+              ...common,
+              'enemy.peekLeft': peekSide('left', 'peekingLeft'),
+              'enemy.peekRight': peekSide('right', 'peekingRight'),
+            }
+          : { ...common, 'enemy.peek': { target: 'peeking' } },
       },
-      peeking: {
-        description: 'Swinging out into the lane. Exposed and moving, so you cannot hit anything yet.',
-        on: {
-          ...common,
-          'enemy.counterStrafe': { target: 'scoped' },
-          'enemy.shoot': shoot,
-          'enemy.fallBack': { target: 'holding' },
-          'world.arrived': { target: 'scoped' },
-        },
-        // The swing finishes on its own: fully out, and standing still.
-        after: { [peekMs]: { target: 'scoped' } },
-      },
+      peeking: peekingState,
+      peekingLeft: peekingState,
+      peekingRight: peekingState,
       scoped: {
         description: 'Exposed, scoped in and standing still. Your shot is accurate; so is theirs.',
-        on: { ...common, 'enemy.shoot': shoot, 'enemy.fallBack': { target: 'holding' } },
+        on: { ...common, 'enemy.shoot': shoot, 'enemy.fallBack': fallBack },
         // Reflex, not a decision: stop baking in the open.
-        after: { [EXPOSED_MS]: { target: 'holding' } },
+        after: { [EXPOSED_MS]: fallBack },
       },
       cycling: {
         description: 'Just fired, bolt cycling. You cannot shoot until it is done.',
-        on: { ...common, 'enemy.fallBack': { target: 'holding' }, 'world.weaponReady': { target: 'scoped' } },
+        on: { ...common, 'enemy.fallBack': fallBack, 'world.weaponReady': { target: 'scoped' } },
         after: { [boltMs]: { target: 'scoped' } },
       },
       dead: { type: 'final' },

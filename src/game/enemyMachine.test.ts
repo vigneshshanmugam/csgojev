@@ -80,6 +80,40 @@ describe('enemy machine', () => {
     a.stop();
   });
 
+  it('split mode offers lane-specific peeks instead of the single-lane peek', () => {
+    const a = createActor(createEnemyMachine(async (r) => mockAnswers(r), { sides: ['left', 'right'] }));
+    a.start();
+    expect(a.getSnapshot().can({ type: 'enemy.peek' })).toBe(false);
+    expect(a.getSnapshot().can({ type: 'enemy.peekLeft' })).toBe(true);
+    expect(a.getSnapshot().can({ type: 'enemy.peekRight' })).toBe(true);
+
+    a.send({ type: 'world.sync', footstepsFrom: 'left', lastSeenSide: 'left' });
+    a.send({ type: 'enemy.peekLeft' });
+    expect(a.getSnapshot().value).toBe('peekingLeft');
+    expect(a.getSnapshot().context.side).toBe('left');
+    a.send({ type: 'world.arrived' });
+    expect(a.getSnapshot().value).toBe('scoped');
+    a.send({ type: 'enemy.fallBack' });
+    expect(a.getSnapshot().value).toBe('holding');
+    expect(a.getSnapshot().context.side).toBeUndefined();
+    a.stop();
+  });
+
+  it('shows split cues to Jev without instructing it to follow them', async () => {
+    const seen: Array<{ actionInstructions: string; state: Record<string, unknown> }> = [];
+    const a = createActor(createEnemyMachine(async (request) => {
+      const action = request.questions.action as { instructions: string };
+      seen.push({ actionInstructions: action.instructions, state: request.state as Record<string, unknown> });
+      return mockAnswers(request);
+    }, { sides: ['left', 'right'] }));
+    a.start();
+    a.send({ type: 'world.sync', footstepsFrom: 'right', lastSeenSide: 'right' });
+    await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0), { timeout: 5000 });
+    expect(seen[seen.length - 1].state.footstepsFrom).toBe('right');
+    expect(seen[seen.length - 1].actionInstructions).not.toContain('Footsteps mean');
+    a.stop();
+  });
+
   it('jev agent drives the machine out of cover', async () => {
     const a = createActor(createEnemyMachine(async (r) => mockAnswers(r, ({ option }) => (option?.includes('peek') ? 5 : undefined))));
     // The bot peeks and falls back and peeks again, so what matters is that it
