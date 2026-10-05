@@ -17,3 +17,5 @@ bench-results.tsv
 runs/
 # Navmesh learned on de_dust2 during early bring-up; nothing loads it now
 gamedata/maps/de_dust2.nav
+# Plugin builds under test, mounted with ADDONS=
+addons-test/

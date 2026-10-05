@@ -19,6 +19,7 @@ export SLOT=${SLOT:-3}
 # ZHOLD=1 pins the zBot where it stands (it still aims and fires): an opponent
 # that holds an angle instead of pushing.
 ZHOLD=${ZHOLD:-0}
+# ENEMY_WEAPON=weapon_m4a1 arms the zBot differently from Jev's bot (WEAPON).
 ROUNDS=${1:-50}
 BRAINS=${2:-"jev rule random"}
 # Set RUN_DIR to share one directory between slots running brains in parallel.
@@ -37,10 +38,13 @@ stop_sidecar() {
 }
 trap stop_sidecar EXIT
 
-PLUGIN_SHA=$(shasum "$HERE/overlay/addons/jevbot/jevbot_mm_i386.so" | cut -c1-12)
+# The build actually mounted: run.sh honours ADDONS= for a plugin under test.
+PLUGIN_SHA=$(shasum "${ADDONS:-$HERE/overlay/addons}/jevbot/jevbot_mm_i386.so" | cut -c1-12)
 GIT_SHA=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo none)
-META=$(printf '{"rounds":%s,"weapon":"%s","turn":%s,"scope":%s,"preaim":%s,"difficulty":%s,"zhold":%s,"plugin":"%s","git":"%s"}' \
-  "$ROUNDS" "$WEAPON" "$TURN" "$SCOPE" "$PREAIM" "$DIFFICULTY" "$ZHOLD" "$PLUGIN_SHA" "$GIT_SHA")
+# A commit only names the code if nothing tracked was changed on top of it.
+DIRTY=$([ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ] && echo false || echo true)
+META=$(printf '{"rounds":%s,"weapon":"%s","enemy_weapon":"%s","turn":%s,"scope":%s,"preaim":%s,"difficulty":%s,"zhold":%s,"plugin":"%s","git":"%s","dirty":%s}' \
+  "$ROUNDS" "$WEAPON" "${ENEMY_WEAPON:-$WEAPON}" "$TURN" "$SCOPE" "$PREAIM" "$DIFFICULTY" "$ZHOLD" "$PLUGIN_SHA" "$GIT_SHA" "$DIRTY")
 
 "$HERE/run.sh"
 sleep 25
@@ -49,6 +53,12 @@ for _ in $(seq 1 45); do [ "$(count 'player server started')" -ge 2 ] && break; 
 for c in "log off" "mp_freezetime 0" "mp_timelimit 0" "bot_quota 0" "jev_spawn 1"; do say "$c"; done
 sleep 8
 say "jev_weapon $WEAPON"
+if [ -n "${ENEMY_WEAPON:-}" ]; then
+  say "jev_enemy_weapon $ENEMY_WEAPON"
+  if [ "$(count "enemy uses $ENEMY_WEAPON")" -eq 0 ]; then
+    echo "compare: ENEMY_WEAPON=$ENEMY_WEAPON but the plugin did not confirm it (built without jev_enemy_weapon?)" >&2; exit 1
+  fi
+fi
 say "jev_tune $TURN $SCOPE $PREAIM"
 say "bot_difficulty $DIFFICULTY"
 if [ "$ZHOLD" != 0 ]; then

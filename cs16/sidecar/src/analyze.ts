@@ -171,7 +171,8 @@ export function report(runs: BrainRun[]): string {
   const meta = runs[0]?.meta ?? {};
   out.push('# Brain comparison', '');
   out.push(
-    `Body: ${meta.weapon} both sides, turn ${meta.turn}°/s, scope ${meta.scope}, preaim ${meta.preaim}. ` +
+    `Body: ${meta.enemy_weapon && meta.enemy_weapon !== meta.weapon ? `${meta.weapon} for Jev's bot, ${meta.enemy_weapon} for the zBot` : `${meta.weapon} both sides`}, ` +
+      `turn ${meta.turn}°/s, scope ${meta.scope}, preaim ${meta.preaim}${meta.dirty ? ' (uncommitted changes in the tree)' : ''}. ` +
       `Opponent: zBot difficulty ${meta.difficulty}${meta.zhold ? ', holding its position' : ''}. Plugin ${meta.plugin}, git ${meta.git}.`,
     '',
   );
