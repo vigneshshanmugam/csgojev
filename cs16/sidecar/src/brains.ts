@@ -9,10 +9,12 @@
  *   rush    the aggressive AWPer: peek at once, scope up at the peek spot,
  *           otherwise the rule brain. Tests whether Jev beats "be aggressive".
  *   rushhold  rush that never falls back while scoped (see rushHoldChoice)
+ *   left/right fixed split-lane openers
+ *   cue     split-lane script: wait for side cues, then peek that side
  */
 import { NOOP_ID, type JevAnswer, type JevClient, type JevRequest } from '@xstate/jev';
 
-export const brains = ['jev', 'jevmem', 'rule', 'rush', 'rushhold', 'random', 'mock'] as const;
+export const brains = ['jev', 'jevmem', 'rule', 'rush', 'rushhold', 'left', 'right', 'cue', 'random', 'mock'] as const;
 /** Brains that call Jev, and so need a key to mean anything. */
 export const isJev = (brain: string) => brain === 'jev' || brain === 'jevmem';
 export type BrainName = (typeof brains)[number];
@@ -29,9 +31,14 @@ export interface Situation {
   yourHp: number;
   playerHp: number;
   roundSecondsLeft: number;
+  side?: 'left' | 'right' | 'behind cover';
+  footstepsFrom?: 'left' | 'right' | 'none';
+  playerLastSeenOn?: 'left' | 'right' | 'unknown' | 'never seen this round';
 }
 
 const PEEK = 'enemy.peek';
+const PEEK_LEFT = 'enemy.peekLeft';
+const PEEK_RIGHT = 'enemy.peekRight';
 const STRAFE = 'enemy.counterStrafe';
 const SHOOT = 'enemy.shoot';
 const FALL_BACK = 'enemy.fallBack';
@@ -61,7 +68,7 @@ export function ruleChoice(s: Situation, offered: readonly string[]): string {
     if (s.aim === 'half settled, a rushed shot' && s.playerDistanceM <= RULES.rushedShotWithinM) return SHOOT;
   }
   if (s.you === 'cycling') return has(FALL_BACK) ? FALL_BACK : wait;
-  if (s.you === 'peeking') return s.playerInSight && has(STRAFE) ? STRAFE : wait;
+  if (s.you.startsWith('peeking')) return s.playerInSight && has(STRAFE) ? STRAFE : wait;
   if (s.you === 'scoped') {
     if (s.playerInSight && s.yourHp < RULES.retreatBelowHp && has(FALL_BACK)) return FALL_BACK;
     return wait;
@@ -90,6 +97,29 @@ export function rushChoice(s: Situation, offered: readonly string[]): string {
 export function rushHoldChoice(s: Situation, offered: readonly string[]): string {
   const choice = rushChoice(s, offered);
   return s.you === 'scoped' && choice === FALL_BACK && offered.includes(NOOP_ID) ? NOOP_ID : choice;
+}
+
+const peekFor = (side: 'left' | 'right') => side === 'left' ? PEEK_LEFT : PEEK_RIGHT;
+
+export function fixedSideChoice(side: 'left' | 'right', s: Situation, offered: readonly string[]): string {
+  const pick = peekFor(side);
+  if (s.you === 'holding' && offered.includes(pick)) return pick;
+  if (s.you.startsWith('peeking') && offered.includes(STRAFE)) return STRAFE;
+  return ruleChoice(s, offered);
+}
+
+export function cueChoice(s: Situation, offered: readonly string[], rand: () => number = Math.random): string {
+  const has = (id: string) => offered.includes(id);
+  const cue =
+    s.footstepsFrom === 'left' || s.footstepsFrom === 'right' ? s.footstepsFrom
+      : s.playerLastSeenOn === 'left' || s.playerLastSeenOn === 'right' ? s.playerLastSeenOn
+        : null;
+  const quiet = typeof s.secondsSincePlayerSeen === 'number' ? s.secondsSincePlayerSeen : 0;
+  const fallback = rand() < 0.5 ? 'left' : 'right';
+  const side = cue ?? (quiet >= RULES.peekAfterQuietS || s.roundSecondsLeft <= RULES.peekWhenRoundLeftS ? fallback : null);
+  if (s.you === 'holding' && side && has(peekFor(side))) return peekFor(side);
+  if (s.you.startsWith('peeking') && has(STRAFE)) return STRAFE;
+  return ruleChoice(s, offered);
 }
 
 /** Answers every choice question with `pick`, in exactly the shape Jev returns. */

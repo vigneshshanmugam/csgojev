@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { NOOP_ID, type JevRequest } from '@xstate/jev';
-import { RULES, randomClient, ruleChoice, ruleClient, rushChoice, rushHoldChoice, type Situation } from './brains';
+import { RULES, cueChoice, fixedSideChoice, randomClient, ruleChoice, ruleClient, rushChoice, rushHoldChoice, type Situation } from './brains';
 import { openRunLog } from './runLog';
 import { MEMORY_ROUNDS, createBot, roundSummary } from './bot';
 import type { Inbound } from './protocol';
@@ -78,6 +78,31 @@ describe('rush-hold brain', () => {
     expect(rushHoldChoice({ ...hurt, aim: 'settled, your best shot' }, ['enemy.shoot', ...offered])).toBe('enemy.shoot');
     expect(rushHoldChoice(at({ you: 'cycling' }), offered)).toBe('enemy.fallBack');
     expect(rushHoldChoice(base, ['enemy.peek', NOOP_ID])).toBe('enemy.peek');
+  });
+});
+
+describe('split-lane brains', () => {
+  const splitCover = ['enemy.peekLeft', 'enemy.peekRight', NOOP_ID];
+
+  it('left and right are fixed-side openers', () => {
+    expect(fixedSideChoice('left', base, splitCover)).toBe('enemy.peekLeft');
+    expect(fixedSideChoice('right', base, splitCover)).toBe('enemy.peekRight');
+    expect(fixedSideChoice('left', at({ you: 'peekingLeft', playerInSight: true }), ['enemy.counterStrafe', NOOP_ID]))
+      .toBe('enemy.counterStrafe');
+  });
+
+  it('cue waits for a side cue, then peeks that side', () => {
+    expect(cueChoice(base, splitCover)).toBe(NOOP_ID);
+    expect(cueChoice(at({ footstepsFrom: 'left' }), splitCover)).toBe('enemy.peekLeft');
+    expect(cueChoice(at({ playerLastSeenOn: 'right' }), splitCover)).toBe('enemy.peekRight');
+  });
+
+  it('cue guesses on quiet or low clock only when no side cue exists', () => {
+    const left = () => 0.1;
+    const right = () => 0.9;
+    expect(cueChoice(at({ secondsSincePlayerSeen: RULES.peekAfterQuietS }), splitCover, left)).toBe('enemy.peekLeft');
+    expect(cueChoice(at({ roundSecondsLeft: RULES.peekWhenRoundLeftS }), splitCover, right)).toBe('enemy.peekRight');
+    expect(cueChoice(at({ footstepsFrom: 'left', roundSecondsLeft: RULES.peekWhenRoundLeftS }), splitCover, right)).toBe('enemy.peekLeft');
   });
 });
 
