@@ -2,9 +2,9 @@
 
 ## Summary
 
-Jev plays this duel at the level of a tuned script, without any hand-written thresholds, but we could not show that it plays better than one. The reason is mostly the duel, not Jev. Across three lever checks, two fixed scripts with opposite openings (`rush` peeks at once, `rule` waits for a cue) never separated, so there is no policy edge on this map for a smarter brain to find. Until the game gives the choices more room to matter, any Jev comparison here will come back as a tie.
+On the original one-lane duel, Jev plays at the level of a tuned script, but we could not show that it plays better than one. Across three lever checks, fixed scripts with opposite openings (`rush` peeks at once, `rule` waits for a cue) never separated, so there was no policy edge for a smarter brain to find.
 
-This is a null result, and I think it is worth stating as one rather than running Jev at 400 rounds per brain and hoping for a small gap.
+The richer split-lane duel changed that. `jev_split` gives the bot two peek lanes and a route cue through `footstepsFrom`. At the pre-registered cap there, Jev was non-inferior to the hand-written cue reader and beat a no-cue sweep script: `jev` 153/198, `cue` 131/198, `sweep` 107/198. This shows Jev can follow a built-in cue in a designed duel well enough to reach cue-reader-level play without the cue rule being hand-written.
 
 ## What we measured
 
@@ -34,6 +34,8 @@ Two design rules came out of early mistakes:
 | Lever check | AWP vs AWP, Expert, four slots | 100 | rush 56%, rule 52% |
 | Lever check | AWP vs M4A1, Expert, four slots, sequential | 100 (futility stop) | rush 56%, rule 55%, z 0.14 |
 | Lever check | AWP vs M4A1, Expert, held zBot, sequential | 400 (cap) | rush 54%, rule 48%, z 1.63 |
+| Split lever | AWP vs M4A1, Expert, `jev_split`, routed zBot | 100 | cue 71%, sweep 55% |
+| Split Jev | AWP vs M4A1, Expert, `jev_split`, routed zBot | 198 (cap) | jev 77%, cue 66%, sweep 54% |
 
 Win rates count draws as non-wins. Run folders are under `cs16/runs/`, named by date.
 
@@ -51,6 +53,10 @@ NOTE: these absolute win rates were measured before `cs16/plugin/jevbot.cpp` sto
 
 The held run was the test for a mixed-opponent design. If a held zBot wanted a different opening than a pushing one, a brain that reads cues could beat both fixed scripts on a mixed schedule. It didn't: the trend favours `rush` against both opponents, so a mixed schedule has nothing to adapt to.
 
+**The split-lane duel has a lever.** `jev_split` adds left and right peek lanes. A scripted zBot route makes footsteps identify the side before contact, then releases the zBot back to stock hunting after the route. In the no-API lever check, `cue` beat `sweep` 71/100 to 55/100. `cue` had 0/100 wrong-side first peeks; `sweep` had 48/100. That made the Jev run worth the API spend.
+
+**Jev cleared the split-lane check.** At the 198-round cap, `jev` went 153-42-3, `cue` 131-67-0 and `sweep` 107-67-24. The primary comparison was non-inferiority to `cue` within 10 points; Jev finished 11.1 points ahead, and the approximate one-sided lower bound for `jev - cue` was about +3.7 points, above the -10 point margin. Against `sweep`, Jev was +23.2 points (p=0.0000016), which settles the secondary comparison. Jev had 0/194 wrong-side delivered first peeks; `cue` had 0/198 and `sweep` had 89/198.
+
 **The fall-back decision is too rare to matter.** In the first 100 `rush` rounds, falling back while the scope settled preceded losses more often for `rule` (13%) than for `rush` (0%). That was confounded, because both scripts fall back only below 50 HP. The confirmatory `rushhold` run was stopped before looking at any win rate: only 5 of 100 rounds reached that branch, so it can move the overall win rate by about 5 points at most, below what 400 rounds per brain can detect.
 
 **Jev opens like `rush`.** It peeks from cover almost every round, and where it departs from what the scripts would do, it does so at 30 to 45% confidence. Part of this is instructed: the brief Jev gets says waiting has a price and describes a rifler walking in, so peeking early is the answer the brief points to.
@@ -58,7 +64,8 @@ The held run was the test for a mixed-opponent design. If a held zBot wanted a d
 ## What this does not show
 
 - **It does not show that Jev is no better than a script.** A null at 400 rounds per brain rules out gaps larger than about 10 points between the scripts, not smaller ones, and Jev itself was only run at 20 to 21 rounds per brain.
-- **It does not cover other maps or opponents.** Everything ran on `jev_duel`, one lane with one peek spot, against zBot on Expert or Hard. A held zBot is also not how the stock bot plays a real match.
+- **The split result is a designed cue-label test.** `jev_split` uses `jev_zroute` to drive the zBot down a lane before releasing it, and the state includes `footstepsFrom: left|right`. That answers whether Jev can map an explicit cue label to the right lane in a game we designed, not whether it reads ambiguous audio or improves the shipped zBot in an ordinary match.
+- **It does not cover other maps or opponents.** The original null runs used `jev_duel`, one lane with one peek spot, against zBot on Expert or Hard. A held zBot is also not how the stock bot plays a real match.
 - **It does not test adaptation across rounds.** Jev sees each situation fresh. A `jevmem` brain that sees a summary of the last 5 rounds exists, but we kept it out of the comparisons until a lever existed, so it is untested.
 
 ## Setup flaws found along the way
@@ -72,10 +79,10 @@ These were caught in the logs and fixed before the next run. Runs record the plu
 
 ## What would change the answer
 
-The duel has to give the choices room to matter before Jev can be separated from a script. In order of how much I expect from each:
+The split result is the first positive result, but it is still narrow. The next ways to strengthen or falsify it:
 
-- **A richer duel.** Several peek lines, repositioning between them, and timing against footsteps, so that holding the wrong angle costs the first shot and the right one depends on what the bot has heard or seen. This is about a day of map, plugin and machine work, and it needs its own lever check with two fixed scripts before any Jev run.
-- **A rifler brain for Jev.** Jev would play the attacker's seat instead of the AWPer's. On the same single-lane map I would expect the same lack of a lever.
-- **Steering the stock zBot** (`cs16/STEERING.md`). Jev would only choose hold or release, which leaves even less room for a decision to matter.
+- **A less built-in cue.** The current route exposes the side through `footstepsFrom`, so the task is close to "map the cue to the lane." A stronger duel would make the cue partial or delayed, with repositioning after first contact.
+- **A rifler brain for Jev.** Jev would play the attacker's seat instead of the AWPer's.
+- **Steering the stock zBot** (`cs16/STEERING.md`). This now looks less promising than the split duel because the choice surface is smaller.
 
 NOTE: the spawn fix changes where the zBot starts in every run, held or pushing, so results from before and after `815437a` are not directly comparable.
