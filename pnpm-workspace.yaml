@@ -1,0 +1,6 @@
+packages:
+  - packages/*
+allowBuilds:
+  esbuild: true
+minimumReleaseAgeExclude:
+  - xstate@6.0.0-alpha.58

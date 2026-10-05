@@ -1,0 +1,114 @@
+// Minimal BotProfile.db, authored from the parser in
+// ReGameDLL_CS/regamedll/game_shared/bot/bot_profile.cpp.
+//
+// The retail file is a client asset and ships with no open-source release, so
+// the Easy opponent is specified here instead. Parser rules that shape this
+// file: a non-Default, non-Template block's first token is a '+'-separated list
+// of already-declared template names and its second token is the profile name,
+// so at least one Template must exist before any profile. Percentages are
+// divided by 100, ReactionTime and AttackDelay are seconds.
+
+Default
+	Skill = 50
+	Aggression = 50
+	ReactionTime = 0.4
+	AttackDelay = 0
+	Teamwork = 75
+	WeaponPreference = none
+	Cost = 0
+	Difficulty = NORMAL
+	VoicePitch = 100
+	Skin = 0
+	Team = ANY
+End
+
+Template Easy
+	Skill = 20
+	Aggression = 30
+	ReactionTime = 0.5
+	AttackDelay = 0.3
+	Teamwork = 50
+	Difficulty = EASY
+	Cost = 0
+End
+
+Easy Zeke
+	Skin = 1
+	VoicePitch = 100
+End
+
+Easy Hollis
+	Skin = 2
+	VoicePitch = 95
+End
+
+Easy Marlow
+	Skin = 3
+	VoicePitch = 105
+End
+
+Easy Pate
+	Skin = 4
+	VoicePitch = 90
+End
+
+// bot_difficulty 1..3 only picks profiles tagged with that difficulty.
+Template Normal
+	Skill = 50
+	Aggression = 50
+	ReactionTime = 0.35
+	AttackDelay = 0.15
+	Teamwork = 65
+	Difficulty = NORMAL
+	Cost = 0
+End
+
+Template Hard
+	Skill = 75
+	Aggression = 70
+	ReactionTime = 0.25
+	AttackDelay = 0.05
+	Teamwork = 75
+	Difficulty = HARD
+	Cost = 0
+End
+
+Template Expert
+	Skill = 100
+	Aggression = 85
+	ReactionTime = 0.15
+	AttackDelay = 0
+	Teamwork = 90
+	Difficulty = EXPERT
+	Cost = 0
+End
+
+Normal Ridley
+	Skin = 1
+	VoicePitch = 100
+End
+
+Normal Quill
+	Skin = 2
+	VoicePitch = 95
+End
+
+Hard Vance
+	Skin = 3
+	VoicePitch = 105
+End
+
+Hard Brask
+	Skin = 4
+	VoicePitch = 90
+End
+
+Expert Kade
+	Skin = 1
+	VoicePitch = 98
+End
+
+Expert Sorrel
+	Skin = 2
+	VoicePitch = 102
+End

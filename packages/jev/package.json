@@ -1,0 +1,13 @@
+{
+  "name": "@xstate/jev",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Let Jev (TypeSafe's System One model) choose the next event for an XState v6 actor",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "peerDependencies": {
+    "xstate": "^6.0.0-alpha.58"
+  }
+}

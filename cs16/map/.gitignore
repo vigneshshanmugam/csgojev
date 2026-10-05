@@ -1,0 +1,8 @@
+# Compile byproducts; jev_duel.bsp is kept.
+out/*.map
+out/*.ext
+out/*.log
+out/*.prt
+out/*.lin
+out/*.wa_
+out/*.p[0-9]

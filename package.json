@@ -1,0 +1,34 @@
+{
+  "name": "csgojev",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "duel": "tsx scripts/duel.ts",
+    "sidecar": "tsx cs16/sidecar/src/main.ts",
+    "duel:cs": "tsx cs16/sidecar/src/duel.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@typesafe-ai/sdk": "0.6.0",
+    "@xstate/jev": "workspace:*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "three": "^0.186.1",
+    "xstate": "6.0.0-alpha.58",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.186.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vite": "^8.3.2",
+    "vitest": "^3.0.0"
+  }
+}
