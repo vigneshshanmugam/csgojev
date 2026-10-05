@@ -19,6 +19,12 @@ export SLOT=${SLOT:-3}
 # ZHOLD=1 pins the zBot where it stands (it still aims and fires): an opponent
 # that holds an angle instead of pushing.
 ZHOLD=${ZHOLD:-0}
+# MAP=jev_split enables the two-lane map; sidecar uses LAYOUT=split.
+MAP=${MAP:-jev_duel}
+LAYOUT=${LAYOUT:-$([ "$MAP" = "jev_split" ] && echo split || echo duel)}
+# ZROUTE drives the zBot's legs on jev_split: off | left | right | random.
+ZROUTE=${ZROUTE:-off}
+ZROUTE_SEED=${ZROUTE_SEED:-1}
 # ENEMY_WEAPON=weapon_m4a1 arms the zBot differently from Jev's bot (WEAPON).
 ROUNDS=${1:-50}
 BRAINS=${2:-"jev rule random"}
@@ -43,12 +49,12 @@ PLUGIN_SHA=$(shasum "${ADDONS:-$HERE/overlay/addons}/jevbot/jevbot_mm_i386.so" |
 GIT_SHA=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo none)
 # A commit only names the code if nothing tracked was changed on top of it.
 DIRTY=$([ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no -- src packages cs16/plugin cs16/sidecar cs16/gamedata cs16/map cs16/body.env 'cs16/*.sh' 2>/dev/null)" ] && echo false || echo true)
-META=$(printf '{"rounds":%s,"weapon":"%s","enemy_weapon":"%s","turn":%s,"scope":%s,"preaim":%s,"difficulty":%s,"zhold":%s,"plugin":"%s","git":"%s","dirty":%s}' \
-  "$ROUNDS" "$WEAPON" "${ENEMY_WEAPON:-$WEAPON}" "$TURN" "$SCOPE" "$PREAIM" "$DIFFICULTY" "$ZHOLD" "$PLUGIN_SHA" "$GIT_SHA" "$DIRTY")
+META=$(printf '{"rounds":%s,"map":"%s","layout":"%s","zroute":"%s","weapon":"%s","enemy_weapon":"%s","turn":%s,"scope":%s,"preaim":%s,"difficulty":%s,"zhold":%s,"plugin":"%s","git":"%s","dirty":%s}' \
+  "$ROUNDS" "$MAP" "$LAYOUT" "$ZROUTE" "$WEAPON" "${ENEMY_WEAPON:-$WEAPON}" "$TURN" "$SCOPE" "$PREAIM" "$DIFFICULTY" "$ZHOLD" "$PLUGIN_SHA" "$GIT_SHA" "$DIRTY")
 
 "$HERE/run.sh"
 sleep 25
-say "map jev_duel" 0
+say "map $MAP" 0
 for _ in $(seq 1 45); do [ "$(count 'player server started')" -ge 2 ] && break; sleep 2; done
 for c in "log off" "mp_freezetime 0" "mp_timelimit 0" "bot_quota 0" "jev_spawn 1"; do say "$c"; done
 sleep 8
@@ -67,6 +73,12 @@ if [ "$ZHOLD" != 0 ]; then
     echo "compare: ZHOLD=1 but the plugin did not confirm it (built without jev_zhold?)" >&2; exit 1
   fi
 fi
+if [ "$ZROUTE" != off ]; then
+  say "jev_zroute $ZROUTE $ZROUTE_SEED"
+  if [ "$(count "zroute=$ZROUTE")" -eq 0 ]; then
+    echo "compare: ZROUTE=$ZROUTE but the plugin did not confirm it (built without jev_zroute?)" >&2; exit 1
+  fi
+fi
 
 block=0
 for brain in $BRAINS; do
@@ -75,7 +87,7 @@ for brain in $BRAINS; do
   # Per slot and block, so parallel slots and a brain repeated on one slot
   # never share a file (each file numbers its rounds from 1).
   RUN="$RUN_DIR/$brain-s$SLOT-b$block"
-  (cd "$ROOT" && BRAIN="$brain" RUN_LOG="$RUN.jsonl" RUN_META="$META" \
+  (cd "$ROOT" && BRAIN="$brain" LAYOUT="$LAYOUT" RUN_LOG="$RUN.jsonl" RUN_META="$META" \
     exec "$ROOT/node_modules/.bin/tsx" cs16/sidecar/src/main.ts) > "$RUN.sidecar.log" 2>&1 &
   SIDECAR_PID=$!
   for _ in $(seq 1 30); do grep -q 'listening' "$RUN.sidecar.log" 2>/dev/null && break; sleep 1; done

@@ -13,7 +13,7 @@ import { ruleChoice, type Situation } from './brains';
 
 type Line =
   | { t: 'meta'; brain: string; [k: string]: unknown }
-  | { t: 'round_start'; round: number; at: number }
+  | { t: 'round_start'; round: number; at: number; route?: 'left' | 'right' | null }
   | { t: 'round_end'; round: number; result: 'win' | 'loss' | 'draw'; at: number }
   | { t: 'death'; round: number; who: 'bot' | 'enemy' }
   | { t: 'move'; round: number; at: number; from: string; to: string; fired: boolean }
@@ -44,6 +44,7 @@ export interface BrainRun {
     firstPeekS: number | null;
     result: 'win' | 'loss' | 'draw';
     seconds: number;
+    route?: 'left' | 'right' | null;
   }>;
   decisions: Decision[];
   moves: Move[];
@@ -141,9 +142,13 @@ export function readRun(path: string, offset = 0): BrainRun {
   const lines = readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as Line);
   const meta = (lines.find((l) => l.t === 'meta') ?? { brain: basename(path, '.jsonl') }) as Record<string, unknown>;
   const starts = new Map<number, number>();
+  const routes = new Map<number, 'left' | 'right' | null>();
   const results = new Map<number, { result: 'win' | 'loss' | 'draw'; seconds: number }>();
   for (const l of lines) {
-    if (l.t === 'round_start') starts.set(l.round, l.at);
+    if (l.t === 'round_start') {
+      starts.set(l.round, l.at);
+      routes.set(l.round, l.route ?? null);
+    }
     if (l.t === 'round_end') results.set(l.round, { result: l.result, seconds: (l.at - (starts.get(l.round) ?? l.at)) / 1000 });
   }
   // Only rounds the duel scored: free-play round starts never get a round_end.
@@ -152,13 +157,13 @@ export function readRun(path: string, offset = 0): BrainRun {
     .map((d) => ({ ...d, round: d.round + offset, result: results.get(d.round)!.result }) as Decision);
   const slot = meta.slot === undefined ? '-' : String(meta.slot);
   const firstPeek = (round: number) => {
-    const m = lines.find((l): l is Move => l.t === 'move' && l.round === round && l.to === 'peeking');
+    const m = lines.find((l): l is Move => l.t === 'move' && l.round === round && l.to.startsWith('peeking'));
     return m && starts.has(round) ? (m.at - starts.get(round)!) / 1000 : null;
   };
   return {
     brain: String(meta.brain),
     meta,
-    rounds: [...results].map(([round, r], i) => ({ round: round + offset, slot, index: i + 1, firstPeekS: firstPeek(round), ...r })),
+    rounds: [...results].map(([round, r], i) => ({ round: round + offset, slot, index: i + 1, firstPeekS: firstPeek(round), route: routes.get(round) ?? null, ...r })),
     decisions,
     moves: lines.filter((l): l is Move => l.t === 'move' && results.has(l.round)).map((m) => ({ ...m, round: m.round + offset })),
   };
@@ -247,6 +252,51 @@ export function report(runs: BrainRun[]): string {
             return here.length ? `${here.filter((x) => x.result === 'win').length}-${here.filter((x) => x.result === 'loss').length}` : '-';
           }),
         ]),
+      ),
+      '',
+    );
+  }
+
+  const hasRoutes = runs.some((r) => r.rounds.some((x) => x.route));
+  if (hasRoutes) {
+    out.push('## By zBot route', '');
+    out.push('Wins-losses-draws split by the route logged at round start.', '');
+    out.push(
+      table(
+        ['brain', 'left route', 'right route'],
+        runs.map((r) => [
+          r.brain,
+          ...(['left', 'right'] as const).map((route) => {
+            const here = r.rounds.filter((x) => x.route === route);
+            if (!here.length) return '-';
+            const w = here.filter((x) => x.result === 'win').length;
+            const l = here.filter((x) => x.result === 'loss').length;
+            return `${w}-${l}-${here.length - w - l}`;
+          }),
+        ]),
+      ),
+      '',
+    );
+
+    out.push('## Split opening', '');
+    out.push('Wrong-side first peeks count rounds where the first delivered peek chose the lane opposite the zBot route.', '');
+    out.push(
+      table(
+        ['brain', 'first left', 'first right', 'wrong side'],
+        runs.map((r) => {
+          let left = 0, right = 0, wrong = 0, withRoute = 0;
+          for (const round of r.rounds) {
+            const first = r.moves.find((m) => m.round === round.round && (m.to === 'peekingLeft' || m.to === 'peekingRight'));
+            if (!first) continue;
+            if (first.to === 'peekingLeft') left++;
+            if (first.to === 'peekingRight') right++;
+            if (round.route) {
+              withRoute++;
+              if ((round.route === 'left' && first.to === 'peekingRight') || (round.route === 'right' && first.to === 'peekingLeft')) wrong++;
+            }
+          }
+          return [r.brain, String(left), String(right), withRoute ? `${wrong}/${withRoute} (${pct(wrong / withRoute)})` : '-'];
+        }),
       ),
       '',
     );
