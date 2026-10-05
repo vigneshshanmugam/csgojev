@@ -59,7 +59,7 @@ Decision latency is a median of about 100ms (p90 about 160 to 200ms). With place
 
 ## Does Jev help?
 
-Not shown yet, and not ruled out. Jev reaches the level of a tuned script without any hand-written thresholds, but the duel is too coarse to tell it apart from one.
+Not shown yet, and not ruled out. Jev reaches the level of a tuned script without any hand-written thresholds, but the duel is too coarse to tell it apart from one. The full write-up is in [`cs16/FINDINGS.md`](cs16/FINDINGS.md).
 
 To isolate Jev, `cs16/compare.sh` swaps only the decision-maker (`cs16/sidecar/src/brains.ts`) while the body, machine, map and zBot stay fixed:
 
@@ -129,6 +129,7 @@ cs16/
   duel.sh bench.sh   full match, and difficulty sweeps
   compare*.sh        brain comparisons: single, balanced across slots, sequential with a stopping rule
   runs/              logs, reports and pre-registrations per comparison (gitignored)
+  FINDINGS.md        does Jev help: what the comparisons showed
   STEERING.md        design for steering a stock zBot with Jev
 ```
 

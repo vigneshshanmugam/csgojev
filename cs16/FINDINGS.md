@@ -1,0 +1,78 @@
+# Does Jev help? Findings so far
+
+## Summary
+
+Jev plays this duel at the level of a tuned script, without any hand-written thresholds, but we could not show that it plays better than one. The reason is mostly the duel, not Jev. Across three lever checks, two fixed scripts with opposite openings (`rush` peeks at once, `rule` waits for a cue) never separated, so there is no policy edge on this map for a smarter brain to find. Until the game gives the choices more room to matter, any Jev comparison here will come back as a tie.
+
+This is a null result, and I think it is worth stating as one rather than running Jev at 400 rounds per brain and hoping for a small gap.
+
+## What we measured
+
+The question was whether Jev's decisions, not the body around them, win rounds. To isolate that, `cs16/compare.sh` swaps only the decision-maker and keeps everything else fixed: the same map (`jev_duel`), the same bot body (`cs16/body.env`: AWP, 220°/s turn, scoped, no pre-aim), the same XState machine, and the same zBot opponent.
+
+The brains (`cs16/sidecar/src/brains.ts`) all answer the same question Jev answers, over the same legal options:
+
+- `jev`: the real model.
+- `rule`: a hand-written AWPer. Holds until a cue (attacker close, 6s of quiet, or a low clock), then peeks.
+- `rush`: peeks at once, then plays like `rule`.
+- `rushhold`: like `rush`, but never falls back while scoped.
+- `random`: a uniform pick among the legal moves.
+
+Every decision is logged with the situation Jev saw, the options, the choice and the outcome (`runLog.ts`), and `analyze.ts` reports win rates with Wilson intervals, Fisher exact tests, and a per-situation breakdown of what each brain chose.
+
+Two design rules came out of early mistakes:
+
+- **Balanced slots.** `compare-balanced.sh` runs every brain on every server slot in a Latin-square order. The first pilot ran one brain per slot, and its headline gap turned out to be mostly a slot effect.
+- **Pre-registered stopping.** `compare-sequential.sh` adds passes of 100 rounds per brain and stops by a rule written down before the run: Haybittle-Peto efficacy at |z| >= 3.29, non-binding futility below 10% conditional power, and two-sided 0.05 at a cap of 400. Each run folder keeps a `PREREGISTRATION.md` with the predictions and the result appended after.
+
+## Results
+
+| Run | Setup | Rounds per brain | Result |
+| --- | --- | --- | --- |
+| Pilot | AWP vs AWP, Hard, one brain per slot | 20 | jev 15-5, rush 13-7, rule 7-13, random 7-13 |
+| Balanced | AWP vs AWP, Expert, three slots | 21 | jev 13-8, rule 12-9, rush 11-10 |
+| Lever check | AWP vs AWP, Expert, four slots | 100 | rush 56%, rule 52% |
+| Lever check | AWP vs M4A1, Expert, four slots, sequential | 100 (futility stop) | rush 56%, rule 55%, z 0.14 |
+| Lever check | AWP vs M4A1, Expert, held zBot, sequential | 400 (cap) | rush 54%, rule 48%, z 1.63 |
+
+Win rates count draws as non-wins. Run folders are under `cs16/runs/`, named by date.
+
+## What the results show
+
+**The pilot's gap was a slot effect.** Jev beat `rule` by 40 points in the pilot (p=0.025). Once every brain played every slot, Jev was +4.8 points against `rule` and +9.5 against `rush`, with Fisher p of 1.0 and 0.76. Detecting a gap that size needs more than 400 rounds per brain.
+
+**The opening is not a lever.** If waiting for a cue and peeking at once lead to the same win rate, then the timing of the peek does not decide rounds, and a brain that times it better has nothing to gain. That held in all three lever checks:
+
+- Against a pushing zBot with an AWP, `rush` 56% and `rule` 52% over 100 rounds each.
+- Against a pushing zBot with an M4A1 (the rifler Jev's brief describes), `rush` 56/100 and `rule` 55/100. The run stopped for futility at the first look, at 3% conditional power.
+- Against a held zBot (`jev_zhold 1`, which aims and fires but never advances), `rush` 54% and `rule` 48% after the full 400 rounds each, z 1.63, not significant.
+
+The held run was the test for a mixed-opponent design. If a held zBot wanted a different opening than a pushing one, a brain that reads cues could beat both fixed scripts on a mixed schedule. It didn't: the trend favours `rush` against both opponents, so a mixed schedule has nothing to adapt to.
+
+**The fall-back decision is too rare to matter.** In the first 100 `rush` rounds, falling back while the scope settled preceded losses more often for `rule` (13%) than for `rush` (0%). That was confounded, because both scripts fall back only below 50 HP. The confirmatory `rushhold` run was stopped before looking at any win rate: only 5 of 100 rounds reached that branch, so it can move the overall win rate by about 5 points at most, below what 400 rounds per brain can detect.
+
+**Jev opens like `rush`.** It peeks from cover almost every round, and where it departs from what the scripts would do, it does so at 30 to 45% confidence. Part of this is instructed: the brief Jev gets says waiting has a price and describes a rifler walking in, so peeking early is the answer the brief points to.
+
+## What this does not show
+
+- **It does not show that Jev is no better than a script.** A null at 400 rounds per brain rules out gaps larger than about 10 points between the scripts, not smaller ones, and Jev itself was only run at 20 to 21 rounds per brain.
+- **It does not cover other maps or opponents.** Everything ran on `jev_duel`, one lane with one peek spot, against zBot on Expert or Hard. A held zBot is also not how the stock bot plays a real match.
+- **It does not test adaptation across rounds.** Jev sees each situation fresh. A `jevmem` brain that sees a summary of the last 5 rounds exists, but we kept it out of the comparisons until a lever existed, so it is untested.
+
+## Setup flaws found along the way
+
+These were caught in the logs and fixed before the next run. Runs record the plugin hash, the git commit and a dirty flag in their `meta` line, so the affected runs can be told apart from the rest.
+
+- **A plugin build was missing `jev_zhold`.** The hold silently did nothing. `compare.sh` now refuses to start unless the plugin confirms the hold, and the same for `jev_enemy_weapon`.
+- **The dirty flag was always true,** because a tracked benchmark file changed during runs. It now looks only at code paths.
+- **A zBot spawn sat out of sight of the peek spot.** One of the zBot's four rotating spawns was behind the player-cover crate. A pushing zBot walked out of it, but a held one stayed hidden, so a quarter of the held run's rounds ran out as draws (103 per brain). Both brains hit it equally, so the comparison stayed unbiased, but those rounds carried no information. The spawn row in `cs16/map/gen.ts` now starts where the whole player hull is in view, and a 20-round smoke test against a held zBot had no draws.
+
+## What would change the answer
+
+The duel has to give the choices room to matter before Jev can be separated from a script. In order of how much I expect from each:
+
+- **A richer duel.** Several peek lines, repositioning between them, and timing against footsteps, so that holding the wrong angle costs the first shot and the right one depends on what the bot has heard or seen. This is about a day of map, plugin and machine work, and it needs its own lever check with two fixed scripts before any Jev run.
+- **A rifler brain for Jev.** Jev would play the attacker's seat instead of the AWPer's. On the same single-lane map I would expect the same lack of a lever.
+- **Steering the stock zBot** (`cs16/STEERING.md`). Jev would only choose hold or release, which leaves even less room for a decision to matter.
+
+NOTE: the spawn fix changes where the zBot starts in every run, held or pushing, so results from before and after `815437a` are not directly comparable.
