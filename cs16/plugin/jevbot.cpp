@@ -730,6 +730,16 @@ static void PreAim(float dt)
 	AimAt(p, dt);
 }
 
+static void AimAtEnemyOrMemory(float dt)
+{
+	if (Alive(g_enemy) && EyeVisible(g_bot, g_enemy)) {
+		AimAt(g_enemy->v.origin + g_enemy->v.view_ofs, dt);
+		return;
+	}
+
+	PreAim(dt);
+}
+
 // Jev chooses whether and when; the legs and the neck are ours.
 static void DriveBot(float dt, int ms)
 {
@@ -753,10 +763,7 @@ static void DriveBot(float dt, int ms)
 		break;
 	case MS_SCOPED:
 	case MS_CYCLING:
-		if (Alive(g_enemy))
-			AimAt(g_enemy->v.origin + g_enemy->v.view_ofs, dt);
-		else
-			AimDownLane(dt);
+		AimAtEnemyOrMemory(dt);
 		break;
 	default:
 		break;
@@ -1206,9 +1213,10 @@ static void StartFrame()
 
 		if (alive && Alive(g_enemy)) {
 			bool see = EyeVisible(g_bot, g_enemy);
-			if (see)
+			if (see) {
 				g_lastSeen = now;
 				g_lastSeenAt = g_enemy->v.origin + g_enemy->v.view_ofs;
+			}
 			bool still = g_bot->v.velocity.Length2D() < 20.0f;
 			g_onTarget = (see && still && CrosshairOn(g_enemy)) ? g_onTarget + dt : 0.0f;
 		} else {

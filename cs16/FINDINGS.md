@@ -37,6 +37,8 @@ Two design rules came out of early mistakes:
 
 Win rates count draws as non-wins. Run folders are under `cs16/runs/`, named by date.
 
+NOTE: these absolute win rates were measured before `cs16/plugin/jevbot.cpp` stopped aiming at hidden zBots. The comparisons inside each run remain fair because every brain used the same body, but the bot had two wallhack-style aim leaks: while scoped or cycling it aimed at the zBot's live origin whenever it was alive, and `g_lastSeenAt` updated every frame even when the zBot was behind a wall. Runs after that fix are not directly comparable to the table above.
+
 ## What the results show
 
 **The pilot's gap was a slot effect.** Jev beat `rule` by 40 points in the pilot (p=0.025). Once every brain played every slot, Jev was +4.8 points against `rule` and +9.5 against `rush`, with Fisher p of 1.0 and 0.76. Detecting a gap that size needs more than 400 rounds per brain.
@@ -66,6 +68,7 @@ These were caught in the logs and fixed before the next run. Runs record the plu
 - **A plugin build was missing `jev_zhold`.** The hold silently did nothing. `compare.sh` now refuses to start unless the plugin confirms the hold, and the same for `jev_enemy_weapon`.
 - **The dirty flag was always true,** because a tracked benchmark file changed during runs. It now looks only at code paths.
 - **A zBot spawn sat out of sight of the peek spot.** One of the zBot's four rotating spawns was behind the player-cover crate. A pushing zBot walked out of it, but a held one stayed hidden, so a quarter of the held run's rounds ran out as draws (103 per brain). Both brains hit it equally, so the comparison stayed unbiased, but those rounds carried no information. The spawn row in `cs16/map/gen.ts` now starts where the whole player hull is in view, and a 20-round smoke test against a held zBot had no draws.
+- **The bot aimed through walls.** The scoped and cycling states aimed at the zBot's live origin whenever it was alive, and a missing brace made `g_lastSeenAt` track the zBot's true position even when `EyeVisible` was false. That inflated absolute win rates. It did not bias brain-vs-brain comparisons inside one run, because all brains shared the same body.
 
 ## What would change the answer
 
