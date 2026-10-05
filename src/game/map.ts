@@ -40,8 +40,8 @@ export const ROUTES: Record<Behaviour, Array<{ x: number; z: number }>> = {
 export const JIGGLE = { x: 0.8, z: -13.2, amplitude: 2.7 };
 
 /** Does the 2D segment a->b cross any box? */
-export function blocked(ax: number, az: number, bx: number, bz: number): boolean {
-  for (const b of BOXES) if (segHitsBox(ax, az, bx, bz, b)) return true;
+export function blocked(ax: number, az: number, bx: number, bz: number, boxes: readonly Box[] = BOXES): boolean {
+  for (const b of boxes) if (segHitsBox(ax, az, bx, bz, b)) return true;
   return false;
 }
 
@@ -58,8 +58,8 @@ function segHitsBox(ax: number, az: number, bx: number, bz: number, b: Box): boo
 }
 
 /** Push a circle out of boxes. */
-export function collide(x: number, z: number, r: number): { x: number; z: number } {
-  for (const b of BOXES) {
+export function collide(x: number, z: number, r: number, boxes: readonly Box[] = BOXES): { x: number; z: number } {
+  for (const b of boxes) {
     const cx = Math.max(b.x0, Math.min(x, b.x1));
     const cz = Math.max(b.z0, Math.min(z, b.z1));
     const dx = x - cx, dz = z - cz;
