@@ -12,12 +12,15 @@ export const OBS_PORT = 27100;
 export const INTENT_PORT = 27101;
 
 /** The machine's state values, as the plugin sees them. */
-export const machineStates = ['holding', 'peeking', 'scoped', 'cycling', 'dead', 'victory', 'timeout'] as const;
+export const machineStates = ['holding', 'peeking', 'peekingLeft', 'peekingRight', 'scoped', 'cycling', 'dead', 'victory', 'timeout'] as const;
 export type MachineState = (typeof machineStates)[number];
 
 /** Waypoints the bot can physically be standing on. `null` means in transit. */
-export const waypoints = ['hold', 'peek'] as const;
+export const waypoints = ['hold', 'peek', 'peekLeft', 'peekRight'] as const;
 export type Waypoint = (typeof waypoints)[number];
+
+export const routeSides = ['left', 'right'] as const;
+export type RouteSide = (typeof routeSides)[number];
 
 export const obsSchema = z.object({
   t: z.literal('obs'),
@@ -29,8 +32,10 @@ export const obsSchema = z.object({
   dist: z.number(),
   enemyHp: z.number(),
   footsteps: z.boolean(),
+  footstepsFrom: z.enum(routeSides).nullish(),
   /** Seconds, or -1 if never seen this round. */
   sinceSeen: z.number(),
+  lastSeenSide: z.enum(routeSides).nullish(),
   roundLeft: z.number(),
   weaponReady: z.boolean(),
   atWaypoint: z.enum(waypoints).nullish(),
@@ -43,7 +48,7 @@ export const obsSchema = z.object({
   onTarget: z.number().optional(),
 });
 
-export const roundStartSchema = z.object({ t: z.literal('round_start'), bot: z.number().int() });
+export const roundStartSchema = z.object({ t: z.literal('round_start'), bot: z.number().int(), route: z.enum(routeSides).nullish() });
 export const botDiedSchema = z.object({ t: z.literal('bot_died'), bot: z.number().int() });
 export const enemyDiedSchema = z.object({ t: z.literal('enemy_died'), bot: z.number().int() });
 export const roundEndSchema = z.object({

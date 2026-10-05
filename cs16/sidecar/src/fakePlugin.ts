@@ -8,7 +8,8 @@
 import dgram from 'node:dgram';
 import { AWP_DMG, RIFLE_BODY, awpHitChance } from '../../../src/game/combat';
 import { ENEMY_HOLD, ENEMY_PEEK, JIGGLE, LANE_M, PLAYER_SPAWN, ROUTES, type Behaviour, blocked, collide } from '../../../src/game/map';
-import { HOST, INTENT_PORT, decode, encode, intentSchema, type Intent, type RoundResult, type Waypoint } from './protocol';
+import { SPLIT_BOXES, SPLIT_HOLD, SPLIT_LANE_M, SPLIT_PEEK_L, SPLIT_PEEK_R, SPLIT_ROUTES, SPLIT_SPAWN, type SplitRoute } from '../../../src/game/split';
+import { HOST, INTENT_PORT, decode, encode, intentSchema, type Intent, type RoundResult, type RouteSide, type Waypoint } from './protocol';
 
 /** The three scripted attackers. They live in `map.ts` with the geometry they have to agree with. */
 export { ROUTES, type Behaviour };
@@ -32,6 +33,8 @@ export interface FakePluginOptions {
   host?: string;
   bot?: number;
   behaviour?: Behaviour;
+  layout?: 'duel' | 'split';
+  route?: SplitRoute | 'random';
   roundSeconds?: number;
   seed?: number;
   log?: (message: string) => void;
@@ -40,6 +43,7 @@ export interface FakePluginOptions {
 export interface RoundReport {
   result: RoundResult;
   behaviour: Behaviour;
+  route: RouteSide | null;
   botHp: number;
   playerHp: number;
   seconds: number;
@@ -90,35 +94,63 @@ export async function openFakePlugin(options: FakePluginOptions) {
 
   function round(overrides: Partial<FakePluginOptions> = {}): Promise<RoundReport> {
     const behaviour = overrides.behaviour ?? options.behaviour ?? 'rusher';
+    const layout = overrides.layout ?? options.layout ?? 'duel';
+    const split = layout === 'split';
     const roundSeconds = overrides.roundSeconds ?? options.roundSeconds ?? 30;
     const random = rng(overrides.seed ?? options.seed ?? 1);
+    const routeMode = overrides.route ?? options.route ?? 'random';
+    const route: RouteSide = routeMode === 'random' ? (random() < 0.5 ? 'left' : 'right') : routeMode;
+    const hold = split ? SPLIT_HOLD : ENEMY_HOLD;
+    const peek = (side: RouteSide | null = null) => split
+      ? side === 'right' ? SPLIT_PEEK_R : SPLIT_PEEK_L
+      : ENEMY_PEEK;
+    const routePoints = split ? SPLIT_ROUTES[route] : ROUTES[behaviour];
+    const spawn = split ? SPLIT_SPAWN : PLAYER_SPAWN;
+    const laneM = split ? SPLIT_LANE_M : LANE_M;
+    const boxes = split ? SPLIT_BOXES : undefined;
 
     const world = {
       t: 0,
-      px: PLAYER_SPAWN.x,
-      pz: PLAYER_SPAWN.z,
+      px: spawn.x,
+      pz: spawn.z,
       playerSpeed: 0,
       playerHp: 100,
       botHp: 100,
       /** 0 at the hold waypoint, 1 at the peek waypoint. */
       et: 0,
       etTarget: 0,
-      legMs: (SWING_M / BOT_SPEED) * 1000,
+      side: (split ? null : 'right') as RouteSide | null,
+      legMs: (Math.hypot(peek(route).x - hold.x, peek(route).z - hold.z) / BOT_SPEED) * 1000,
       boltUntil: -1,
       lastSeenAt: null as number | null,
+      lastSeenSide: null as RouteSide | null,
       /** Seconds the crosshair has been settled on the player: it only builds while stopped and looking at them. */
       onTarget: 0,
     };
     const report: RoundReport = {
-      result: 'draw', behaviour, botHp: 100, playerHp: 100, seconds: 0,
+      result: 'draw', behaviour, route: split ? route : null, botHp: 100, playerHp: 100, seconds: 0,
       states: [], intents: 0, shots: 0, hits: 0, chances: [], arrivals: 0,
     };
 
-    const botX = () => ENEMY_HOLD.x + (ENEMY_PEEK.x - ENEMY_HOLD.x) * world.et;
-    const visible = () => !blocked(botX(), ENEMY_HOLD.z, world.px, world.pz);
+    const botPos = () => {
+      const p = peek(world.side);
+      return { x: hold.x + (p.x - hold.x) * world.et, z: hold.z + (p.z - hold.z) * world.et };
+    };
+    const visible = () => {
+      const b = botPos();
+      return !blocked(b.x, b.z, world.px, world.pz, boxes);
+    };
     const botMoving = () => Math.abs(world.et - world.etTarget) > 0.01;
-    const distance = () => Math.hypot(world.px - botX(), world.pz - ENEMY_HOLD.z);
-    const waypoint = (): Waypoint | null => (world.et >= 0.999 ? 'peek' : world.et <= 0.001 ? 'hold' : null);
+    const distance = () => {
+      const b = botPos();
+      return Math.hypot(world.px - b.x, world.pz - b.z);
+    };
+    const waypoint = (): Waypoint | null => {
+      if (world.et <= 0.001) return 'hold';
+      if (world.et < 0.999) return null;
+      if (!split) return 'peek';
+      return world.side === 'right' ? 'peekRight' : 'peekLeft';
+    };
     const say = (...parts: unknown[]) => log?.(`${world.t.toFixed(1).padStart(5)}s ${parts.join(' ')}`);
 
     let lastSeq = -1;
@@ -130,10 +162,13 @@ export async function openFakePlugin(options: FakePluginOptions) {
 
     /** The intent says where the bot wants to be; its legs take as long as they take. */
     const applyState = (state: Intent['state']) => {
-      const target = state === 'peeking' ? 1 : state === 'holding' ? 0 : world.etTarget;
+      if (state === 'peekingLeft') world.side = 'left';
+      if (state === 'peekingRight') world.side = 'right';
+      const target = ['peeking', 'peekingLeft', 'peekingRight'].includes(state) ? 1 : state === 'holding' ? 0 : world.etTarget;
       if (target === world.etTarget) return;
       world.etTarget = target;
-      world.legMs = (SWING_M / BOT_SPEED) * 1000 * (0.75 + random() * 0.7);
+      const p = peek(world.side);
+      world.legMs = (Math.hypot(p.x - hold.x, p.z - hold.z) / BOT_SPEED) * 1000 * (0.75 + random() * 0.7);
       settled = false;
     };
 
@@ -155,12 +190,11 @@ export async function openFakePlugin(options: FakePluginOptions) {
     };
 
     const playerTarget = (): { x: number; z: number } => {
-      const route = ROUTES[behaviour];
-      const here = route[Math.min(leg, route.length - 1)];
-      if (leg < route.length - 1 && Math.hypot(here.x - world.px, here.z - world.pz) < 0.6) leg++;
+      const here = routePoints[Math.min(leg, routePoints.length - 1)];
+      if (leg < routePoints.length - 1 && Math.hypot(here.x - world.px, here.z - world.pz) < 0.6) leg++;
       // Once at the end of the route the jiggler keeps stepping in and out of the angle.
-      if (behaviour === 'jiggler' && leg === route.length - 1) return { x: JIGGLE.x, z: Math.sin(world.t * 1.2) * JIGGLE.amplitude + JIGGLE.z };
-      return route[Math.min(leg, route.length - 1)];
+      if (!split && behaviour === 'jiggler' && leg === routePoints.length - 1) return { x: JIGGLE.x, z: Math.sin(world.t * 1.2) * JIGGLE.amplitude + JIGGLE.z };
+      return routePoints[Math.min(leg, routePoints.length - 1)];
     };
 
     onIntent = (intent) => {
@@ -179,7 +213,7 @@ export async function openFakePlugin(options: FakePluginOptions) {
     return new Promise<RoundReport>((resolve) => {
       const started = Date.now();
       let last = started;
-      send({ t: 'round_start', bot: botId });
+      send({ t: 'round_start', bot: botId, route: split ? route : undefined });
 
       const finish = async (result: RoundResult) => {
         clearInterval(timer);
@@ -208,7 +242,7 @@ export async function openFakePlugin(options: FakePluginOptions) {
         world.playerSpeed = d > 0.2 ? PLAYER_SPEED : 0;
         if (d > 0) {
           const move = Math.min(d, world.playerSpeed * dt);
-          const next = collide(world.px + (dx / d) * move, world.pz + (dz / d) * move, 0.4);
+          const next = collide(world.px + (dx / d) * move, world.pz + (dz / d) * move, 0.4, boxes);
           world.px = next.x;
           world.pz = next.z;
         }
@@ -234,9 +268,10 @@ export async function openFakePlugin(options: FakePluginOptions) {
         } else {
           seenSince ??= world.t;
           world.lastSeenAt = world.t;
+          world.lastSeenSide = split ? route : null;
           if (world.t - seenSince > 0.25 && world.t - lastShot > 0.15 && world.botHp > 0 && world.playerHp > 0) {
             lastShot = world.t;
-            const aim = Math.max(0.08, 0.9 - distance() / (LANE_M * 1.2)) * (world.playerSpeed > 1 ? 0.3 : 1);
+            const aim = Math.max(0.08, 0.9 - distance() / (laneM * 1.2)) * (world.playerSpeed > 1 ? 0.3 : 1);
             if (random() < aim) {
               world.botHp = Math.max(0, world.botHp - RIFLE_BODY);
               say(`player hits, bot hp ${world.botHp}`);
@@ -253,7 +288,9 @@ export async function openFakePlugin(options: FakePluginOptions) {
           dist: Number(distance().toFixed(1)),
           enemyHp: world.playerHp,
           footsteps: world.playerSpeed > 2.5 && distance() < FOOTSTEP_RANGE,
+          footstepsFrom: split && world.playerSpeed > 2.5 && distance() < FOOTSTEP_RANGE ? route : null,
           sinceSeen: world.lastSeenAt === null ? -1 : Number((world.t - world.lastSeenAt).toFixed(2)),
+          lastSeenSide: world.lastSeenSide,
           roundLeft: Number(Math.max(0, roundSeconds - world.t).toFixed(1)),
           weaponReady: world.t >= world.boltUntil,
           atWaypoint: waypoint(),

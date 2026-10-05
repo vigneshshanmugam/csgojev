@@ -25,6 +25,8 @@ export interface SidecarOptions {
   onMove?: (bot: number, move: Move) => void;
   /** Show each bot's brain how its recent rounds went. */
   memory?: boolean;
+  /** Map/machine layout. */
+  layout?: 'duel' | 'split';
 }
 
 export interface Sidecar {
@@ -47,6 +49,7 @@ export async function startSidecar(options: SidecarOptions): Promise<Sidecar> {
     onDecision,
     onMove,
     memory,
+    layout = 'duel',
   } = options;
 
   const socket = dgram.createSocket('udp4');
@@ -66,6 +69,7 @@ export async function startSidecar(options: SidecarOptions): Promise<Sidecar> {
         onDecision: onDecision && ((d) => onDecision(id, d)),
         onMove: onMove && ((m) => onMove(id, m)),
         memory,
+        layout,
       });
       bots.set(id, bot);
       bot.start();

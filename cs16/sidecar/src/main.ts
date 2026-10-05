@@ -5,6 +5,7 @@
  *   pnpm sidecar          # mock Jev unless TYPESAFE_API_KEY is set
  *   SLOT=1 pnpm sidecar   # pairs with SLOT=1 cs16/duel.sh: ports 27110/27111
  *   BRAIN=rule pnpm sidecar                  # jev (default) | jevmem | rule | rush | random | mock
+ *   LAYOUT=split pnpm sidecar                # use split-lane machine/events
  *   RUN_LOG=cs16/runs/x.jsonl pnpm sidecar   # write every decision and round outcome
  *
  * OBS and INTENT override the slot's ports, matching cs16/slot.sh. RUN_META is
@@ -21,6 +22,8 @@ const inPort = Number(process.env.OBS ?? OBS_PORT + 10 * slot);
 const outPort = Number(process.env.INTENT ?? INTENT_PORT + 10 * slot);
 const brain = (process.env.BRAIN ?? 'jev') as BrainName;
 if (!brains.includes(brain)) throw new Error(`BRAIN must be one of ${brains.join(', ')}`);
+const layout = (process.env.LAYOUT ?? 'duel') as 'duel' | 'split';
+if (!['duel', 'split'].includes(layout)) throw new Error('LAYOUT must be duel or split');
 
 const handle = await makeClient(brain);
 if (isJev(brain) && !handle.live && process.env.RUN_LOG) {
@@ -41,6 +44,7 @@ const sidecar = await startSidecar({
   onDecision: runLog?.decision,
   onMove: runLog?.move,
   memory: brain === 'jevmem',
+  layout,
 });
 
 const stop = async () => {

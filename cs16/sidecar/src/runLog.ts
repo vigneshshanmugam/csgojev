@@ -80,7 +80,7 @@ export function openRunLog(path: string, meta: Record<string, unknown>): RunLog 
     },
     move: (bot, m) => write({ t: 'move', round, bot, at: Date.now(), ...m }),
     packet: (packet) => {
-      if (packet.t === 'round_start') write({ t: 'round_start', round: ++round, at: Date.now() });
+      if (packet.t === 'round_start') write({ t: 'round_start', round: ++round, at: Date.now(), route: packet.route ?? null });
       else if (packet.t === 'bot_died') write({ t: 'death', round, who: 'bot', at: Date.now() });
       else if (packet.t === 'enemy_died') write({ t: 'death', round, who: 'enemy', at: Date.now() });
       else if (packet.t === 'round_end') write({ t: 'round_end', round, result: packet.result, at: Date.now() });

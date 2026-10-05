@@ -49,6 +49,8 @@ export interface BotOptions {
   onMove?: (move: Move) => void;
   /** Show the brain how its last rounds went (see `roundSummary`). */
   memory?: boolean;
+  /** Two-lane layout: offer side-specific peeks and side cues. */
+  layout?: 'duel' | 'split';
 }
 
 /** Rounds of history shown to the brain. */
@@ -84,13 +86,16 @@ function syncKey(patch: Partial<EnemyContext>): string {
     playerDistance: Math.round((patch.playerDistance ?? 0) / 2),
     sinceSeen: Math.round((patch.sinceSeen ?? -1) / 2),
     roundLeft: Math.round((patch.roundLeft ?? 0) / 5),
+    footstepsFrom: patch.footstepsFrom,
+    lastSeenSide: patch.lastSeenSide,
     // Crossing into a new reading is exactly when the shot becomes legal, so
     // the bucket both throttles the feed and delivers the value in time.
     onTarget: aimBucket(patch.onTarget),
   });
 }
 
-export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log, onDecision, onMove, memory }: BotOptions) {
+export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log, onDecision, onMove, memory, layout = 'duel' }: BotOptions) {
+  const split = layout === 'split';
   let actor: Actor<ReturnType<typeof createEnemyMachine>> | null = null;
   let state: MachineState = 'holding';
   let shots = 0;
@@ -146,6 +151,7 @@ export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log,
       boltMs: BOLT_SAFETY_MS,
       aimSeconds,
       aimSettledSeconds: AIM_SETTLED_SECONDS,
+      ...(split ? { sides: ['left', 'right'] as const } : {}),
       ...(memory ? { memory: () => history } : {}),
     }));
     actor.subscribe((snapshot) => {
@@ -153,8 +159,8 @@ export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log,
       const fired = snapshot.context.shots > shots;
       shots = snapshot.context.shots;
       if (fired) weaponBusySeen = false;
-      if (value === 'peeking' && value !== state) arrivalSent = false;
-      if (value === 'peeking' && firstPeekS === null) firstPeekS = (Date.now() - roundStartedAt) / 1000;
+      if (value.startsWith('peeking') && value !== state) arrivalSent = false;
+      if (value.startsWith('peeking') && firstPeekS === null) firstPeekS = (Date.now() - roundStartedAt) / 1000;
       if (value === state && !fired) return;
       if (value !== state) log?.(`bot ${id} ${state} -> ${value}`);
       onMove?.({ from: state, to: value, fired });
@@ -175,7 +181,9 @@ export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log,
       playerDistance: obs.dist,
       playerHp: obs.enemyHp,
       heardFootsteps: obs.footsteps,
+      footstepsFrom: obs.footstepsFrom ?? null,
       sinceSeen: obs.sinceSeen,
+      lastSeenSide: obs.lastSeenSide ?? null,
       onTarget: obs.onTarget ?? 0,
       roundLeft: obs.roundLeft,
     };
@@ -191,7 +199,11 @@ export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log,
     // The engine owns these two, so they are events rather than context. Sent
     // on the edge only: an event the machine ignores still wakes the agent, and
     // at 20Hz that would keep resetting its settle window so it never decides.
-    if (state === 'peeking' && obs.atWaypoint === 'peek' && !arrivalSent) {
+    const arrived =
+      (state === 'peeking' && obs.atWaypoint === 'peek') ||
+      (state === 'peekingLeft' && obs.atWaypoint === 'peekLeft') ||
+      (state === 'peekingRight' && obs.atWaypoint === 'peekRight');
+    if (arrived && !arrivalSent) {
       arrivalSent = true;
       actor.send({ type: 'world.arrived' });
     }

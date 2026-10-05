@@ -23,9 +23,9 @@ afterEach(async () => {
 });
 
 /** Both ends on ephemeral ports so tests never touch 27100/27101. */
-async function duel(): Promise<{ plugin: FakePlugin; sidecar: Sidecar }> {
-  const plugin = await openFakePlugin({ sidecarPort: 0, listenPort: 0, roundSeconds: 12 });
-  const sidecar = await startSidecar({ client, inPort: 0, outPort: plugin.port });
+async function duel(layout: 'duel' | 'split' = 'duel'): Promise<{ plugin: FakePlugin; sidecar: Sidecar }> {
+  const plugin = await openFakePlugin({ sidecarPort: 0, listenPort: 0, roundSeconds: 12, layout });
+  const sidecar = await startSidecar({ client, inPort: 0, outPort: plugin.port, layout });
   plugin.setSidecarPort(sidecar.port);
   open.push(() => plugin.close(), () => sidecar.close());
   return { plugin, sidecar };
@@ -58,5 +58,15 @@ describe('sidecar end to end over UDP', () => {
     // The holder never clears the pillar, so nobody can win: the round times out.
     expect(report.result).toBe('draw');
     expect(report.states[report.states.length - 1]).toBe('timeout');
+  }, 30_000);
+
+  it('plays a split-lane round with route and side-specific peeks', async () => {
+    const { plugin } = await duel('split');
+    const report = await plugin.round({ route: 'left', seed: 9 });
+
+    expect(report.route).toBe('left');
+    expect(['win', 'loss', 'draw']).toContain(report.result);
+    expect(report.states.some((s) => s === 'peekingLeft' || s === 'peekingRight')).toBe(true);
+    expect(report.arrivals).toBeGreaterThan(0);
   }, 30_000);
 });
