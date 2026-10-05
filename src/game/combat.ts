@@ -1,10 +1,14 @@
 /** Duel resolution, kept out of the renderer so the headless sim and the game agree on the numbers. */
 
+/** CS 1.6 numbers. The player carries an AK-47, the bot an AWP. */
 export const AWP_DMG = 115; // one hit, anywhere
-export const RIFLE_BODY = 34; // three to kill
-export const RIFLE_HEAD = 100;
+export const RIFLE_BODY = 36; // AK-47, three to kill
+export const RIFLE_HEAD = 144; // AK-47 headshot, x4
 export const MAG = 30;
-export const RELOAD_MS = 2500;
+export const RESERVE = 90;
+export const RELOAD_MS = 2450;
+/** AK-47 fire interval, 600 rounds a minute. */
+export const FIRE_INTERVAL_MS = 100;
 /**
  * The lane is ~23m, so an attacker who simply walks it arrives in about four
  * seconds. 45s is roughly ten traverses: long enough for the peek / fall back /
@@ -42,4 +46,11 @@ export function awpHitChance({ enemyMoving, playerSpeed, onTarget }: {
 }): number {
   const aim = Math.min(1, Math.max(0, onTarget) / ACQUIRE_SECONDS);
   return (enemyMoving ? 0.18 : 0.92) * (playerSpeed > 1 ? 0.7 : 1) * (0.15 + 0.85 * aim);
+}
+
+/** The four aim readings the machine shows Jev, so feeds only resync when one changes. */
+export function aimBucket(onTarget = 0): 0 | 1 | 2 | 3 {
+  if (onTarget <= 0) return 0;
+  if (onTarget < MIN_AIM_SECONDS) return 1;
+  return onTarget < ACQUIRE_SECONDS ? 2 : 3;
 }

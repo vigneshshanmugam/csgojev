@@ -5,7 +5,7 @@
  */
 import { createActor, type Actor } from 'xstate';
 import type { JevClient, JevDecision } from '@xstate/jev';
-import { ACQUIRE_SECONDS, MIN_AIM_SECONDS } from '../../../src/game/combat';
+import { ACQUIRE_SECONDS, MIN_AIM_SECONDS, aimBucket } from '../../../src/game/combat';
 import { createEnemyMachine, type EnemyContext } from '../../../src/game/enemyMachine';
 import type { Inbound, Intent, MachineState, Obs } from './protocol';
 
@@ -25,12 +25,7 @@ export const BOLT_SAFETY_MS = 2500;
 export const AIM_MIN_SECONDS = MIN_AIM_SECONDS;
 export const AIM_SETTLED_SECONDS = ACQUIRE_SECONDS;
 
-/** The same four readings the machine shows Jev, so the feed only resyncs when one changes. */
-export function aimBucket(onTarget = 0): 0 | 1 | 2 | 3 {
-  if (onTarget <= 0) return 0;
-  if (onTarget < AIM_MIN_SECONDS) return 1;
-  return onTarget < AIM_SETTLED_SECONDS ? 2 : 3;
-}
+export { aimBucket };
 
 export interface BotStats {
   decisions: number;

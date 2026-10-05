@@ -1,12 +1,8 @@
 html, body, #root { margin: 0; height: 100%; background: #000; overflow: hidden; font-family: ui-monospace, Menlo, monospace; color: #fff; }
 .viewport { position: fixed; inset: 0; }
 .hud { position: fixed; inset: 0; pointer-events: none; }
-.crosshair { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; border-radius: 50%; background: #3f3; box-shadow: 0 0 0 1px #000; }
 .hitmarker { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 28px; color: #fff; }
 .damage { position: absolute; inset: 0; background: radial-gradient(transparent 40%, rgba(255, 0, 0, 0.6)); }
-.bottom-left { position: absolute; left: 24px; bottom: 20px; font-size: 28px; text-shadow: 0 0 4px #000; }
-.ammo { font-size: 20px; opacity: 0.85; }
-.clock { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); font-size: 24px; letter-spacing: 1px; text-shadow: 0 0 4px #000; }
 .debug { position: absolute; left: 16px; top: 16px; background: rgba(0, 0, 0, 0.6); padding: 8px 10px; font-size: 12px; line-height: 1.5; border-left: 3px solid #3cf; }
 .jev { position: absolute; right: 16px; top: 16px; width: 300px; background: rgba(0, 0, 0, 0.6); padding: 10px 12px; font-size: 12px; border-left: 3px solid #f90; }
 .jev .title { font-weight: bold; color: #f90; margin-bottom: 4px; }
@@ -17,3 +13,20 @@ html, body, #root { margin: 0; height: 100%; background: #000; overflow: hidden;
 .splash { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; font-size: 36px; background: rgba(0, 0, 0, 0.45); pointer-events: auto; cursor: pointer; user-select: none; }
 .splash small { font-size: 14px; opacity: 0.8; }
 .splash button { margin-top: 14px; font: inherit; font-size: 16px; padding: 6px 16px; cursor: pointer; }
+/* CS 1.6 HUD: Verdana-ish numerals in the stock amber, four-line green dynamic crosshair. */
+.hud { font-family: Verdana, Geneva, sans-serif; }
+.crosshair { position: absolute; left: 50%; top: 50%; width: 0; height: 0; --gap: 4px; }
+.crosshair i { position: absolute; background: #50fa50; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55); }
+.crosshair .l, .crosshair .r { width: 7px; height: 2px; margin-top: -1px; }
+.crosshair .t, .crosshair .b { width: 2px; height: 7px; margin-left: -1px; }
+.crosshair .l { right: var(--gap); }
+.crosshair .r { left: var(--gap); }
+.crosshair .t { bottom: var(--gap); }
+.crosshair .b { top: var(--gap); }
+.cs-hp, .cs-ammo { position: absolute; bottom: 18px; font-size: 40px; color: #ffb000; text-shadow: 0 0 6px rgba(255, 176, 0, 0.45), 1px 1px 0 #000; }
+.cs-hp { left: 28px; }
+.cs-hp .cross { font-size: 30px; }
+.cs-ammo { right: 28px; }
+.cs-ammo span { font-size: 24px; opacity: 0.85; }
+.cs-ammo small { display: block; text-align: right; font-size: 13px; letter-spacing: 2px; }
+.clock { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); font-size: 24px; color: #ffb000; background: rgba(0, 0, 0, 0.45); padding: 2px 14px; text-shadow: 1px 1px 0 #000; }

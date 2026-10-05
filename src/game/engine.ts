@@ -1,9 +1,13 @@
 import * as THREE from 'three';
 import { createActor, type Actor } from 'xstate';
 import type { JevClient } from '@xstate/jev';
-import { AWP_DMG, MAG, RELOAD_MS, RIFLE_BODY, RIFLE_HEAD, ROUND_SECONDS, awpHitChance, playerSpread } from './combat';
-import { PEEK_MS, createEnemyMachine } from './enemyMachine';
+import {
+  ACQUIRE_SECONDS, AWP_DMG, FIRE_INTERVAL_MS, MAG, MIN_AIM_SECONDS, RELOAD_MS, RESERVE, RIFLE_BODY, RIFLE_HEAD,
+  ROUND_SECONDS, aimBucket, awpHitChance, playerSpread,
+} from './combat';
+import { BOLT_MS, PEEK_MS, createEnemyMachine } from './enemyMachine';
 import { BOXES, ENEMY_HOLD, ENEMY_PEEK, EYE, PLAYER_SPAWN, blocked, collide } from './map';
+import { SKY, ak47, crate, ctBot, dirt, sandstone, tiled } from './look';
 
 export interface DecisionRow { at: number; choice: string; confidence: number; ms: number; reason: string; cached: boolean }
 export interface Debug {
@@ -11,18 +15,35 @@ export interface Debug {
   losToEnemy: boolean; distance: number; requests: number; lastKey: string | null;
 }
 export interface Hud {
-  hp: number; ammo: number; reloading: boolean; enemyHp: number; enemyState: string;
+  hp: number; ammo: number; reserve: number; reloading: boolean; enemyHp: number; enemyState: string;
   jev: string; jevError: string | null; decisions: DecisionRow[];
   over: null | 'win' | 'lose' | 'time'; locked: boolean;
   hit: number; damaged: number; live: boolean; time: number; debug: Debug | null;
+  /** Crosshair gap in px: widens with movement, like the CS 1.6 dynamic crosshair. */
+  gap: number;
 }
 
-/** Player movement, CS-ish: quick to full speed, and stoppable in ~0.15s by counter-strafing. */
-const MAX_SPEED = 5.5; // m/s
-const WALK = 0.42; // shift
-const ACCEL = 9; // 1/s, applied against the wish speed
-const FRICTION = 7; // 1/s
-const STOP_SPEED = 1.2; // m/s floor on friction, so slow drift still stops
+/**
+ * GoldSrc ground movement with the stock cvars, converted at 39.37 units/m:
+ * AK-47 maxspeed 221 u/s, shift is 0.52 of it, sv_accelerate 5, sv_friction 4,
+ * sv_stopspeed 75. Same rules the real bot's opponent plays by.
+ */
+const UPM = 39.37;
+const MAX_SPEED = 221 / UPM; // m/s
+const WALK = 0.52; // shift
+const ACCEL = 5; // sv_accelerate, applied against the wish speed
+const FRICTION = 4; // sv_friction
+const STOP_SPEED = 75 / UPM; // sv_stopspeed: floor on friction, so slow drift still stops
+/** CS 1.6 default: fov 90 is horizontal. Three.js wants vertical, derived on resize. */
+const HFOV = 90;
+/** m_yaw 0.022 deg per count at the stock sensitivity of 3. `?sens=` overrides it. */
+const DEG = Math.PI / 180;
+/**
+ * The bot's own safety nets. Against a real engine these only fire if the
+ * plugin goes quiet; here the renderer reports arrival and the bolt itself.
+ */
+const PEEK_SAFETY_MS = 2000;
+const BOLT_SAFETY_MS = 2500;
 
 /** Running this close is audible through a wall. About half the lane, so the cue still means "close". */
 const FOOTSTEP_RANGE = 12;
@@ -30,14 +51,19 @@ const FOOTSTEP_SPEED = 2.5;
 
 export class Game {
   readonly hud: Hud = {
-    hp: 100, ammo: MAG, reloading: false, enemyHp: 100, enemyState: 'holding',
+    hp: 100, ammo: MAG, reserve: RESERVE, reloading: false, enemyHp: 100, enemyState: 'holding',
     jev: 'watching', jevError: null, decisions: [], over: null, locked: false,
-    hit: 0, damaged: 0, live: false, time: ROUND_SECONDS, debug: null,
+    hit: 0, damaged: 0, live: false, time: ROUND_SECONDS, debug: null, gap: 4,
   };
   private listeners = new Set<() => void>();
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(75, 1, 0.05, 100);
+  private viewmodel = ak47();
+  private kick = 0; private bob = 0;
+  private sens: number;
+  private arrivalSent = true;
+  private boltReadyAt = 0; private bolting = false;
   private walls = new THREE.Group();
   private enemy = new THREE.Group();
   private enemyParts: THREE.Mesh[] = [];
@@ -63,7 +89,9 @@ export class Game {
 
   constructor(private el: HTMLElement, private client: JevClient, live: boolean) {
     this.hud.live = live;
-    this.debug = new URLSearchParams(location.search).has('debug');
+    const q = new URLSearchParams(location.search);
+    this.debug = q.has('debug');
+    this.sens = 0.022 * DEG * (Number(q.get('sens')) || 3);
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     el.appendChild(this.renderer.domElement);
@@ -96,17 +124,22 @@ export class Game {
     this.et = 0; this.etTarget = 0;
     this.keys.clear();
     Object.assign(this.hud, {
-      hp: 100, ammo: MAG, reloading: false, enemyHp: 100, over: null, decisions: [],
+      hp: 100, ammo: MAG, reserve: RESERVE, reloading: false, enemyHp: 100, over: null, decisions: [],
       jev: 'watching', jevError: null, enemyState: 'holding', hit: 0, damaged: 0, time: ROUND_SECONDS,
     });
     this.lastShots = 0; this.lastCtx = ''; this.seenDecisions = 0;
     this.lastSeenAt = null; this.visibleSince = null; this.elapsed = 0; this.reloadAt = 0;
+    this.arrivalSent = true; this.bolting = false; this.boltReadyAt = 0; this.kick = 0;
     this.clearTracers();
     this.enemyDown = false;
     this.enemy.visible = true;
     this.enemy.rotation.set(0, 0, 0);
     this.placeEnemy();
-    this.actor = createActor(createEnemyMachine(this.client));
+    // Same wiring as the CS sidecar: the world reports arrival and the bolt,
+    // the aim gate is on, and the machine's timers are only safety nets.
+    this.actor = createActor(createEnemyMachine(this.client, {
+      peekMs: PEEK_SAFETY_MS, boltMs: BOLT_SAFETY_MS, aimSeconds: MIN_AIM_SECONDS, aimSettledSeconds: ACQUIRE_SECONDS,
+    }));
     this.actor.subscribe((s) => this.onEnemy(s));
     this.actor.start();
     this.emit();
@@ -131,44 +164,42 @@ export class Game {
   // --- scene ---
   private buildScene() {
     const s = this.scene;
-    s.background = new THREE.Color(0xcfe2f3);
+    s.background = new THREE.Color(SKY);
     // Starts past the far end of the lane: the duel is fought at ~23m, and a
     // player who cannot see the AWPer killing them is not in a duel.
-    s.fog = new THREE.Fog(0xcfe2f3, 30, 80);
-    s.add(new THREE.HemisphereLight(0xffffff, 0x8a7a5a, 1.1));
-    const sun = new THREE.DirectionalLight(0xfff2d0, 1.6);
+    s.fog = new THREE.Fog(SKY, 30, 80);
+    s.add(new THREE.HemisphereLight(0xfff4dc, 0x8a7a5a, 1.5));
+    const sun = new THREE.DirectionalLight(0xfff0c8, 1.8);
     sun.position.set(-20, 40, 10);
     s.add(sun);
     // Sized off the walls, so the floor cannot drift out from under them.
     const x0 = Math.min(...BOXES.map((b) => b.x0)), x1 = Math.max(...BOXES.map((b) => b.x1));
     const z0 = Math.min(...BOXES.map((b) => b.z0)), z1 = Math.max(...BOXES.map((b) => b.z1));
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0), new THREE.MeshStandardMaterial({ color: 0xc9b58a, roughness: 1 }));
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0), tiled(dirt(), x1 - x0, 2, z1 - z0));
     floor.rotation.x = -Math.PI / 2;
     floor.position.set((x0 + x1) / 2, 0, (z0 + z1) / 2);
     s.add(floor);
+    const stone = sandstone(), wood = crate();
     for (const b of BOXES) {
+      const w = b.x1 - b.x0, d = b.z1 - b.z0;
+      // Cover that is lower than the walls is crates; the rest is sandstone.
       const m = new THREE.Mesh(
-        new THREE.BoxGeometry(b.x1 - b.x0, b.h, b.z1 - b.z0),
-        new THREE.MeshStandardMaterial({ color: b.color, roughness: 0.95 }),
+        new THREE.BoxGeometry(w, b.h, d),
+        b.h < 3 ? tiled(wood, w, b.h, d) : tiled(stone, w, b.h, d),
       );
       m.position.set((b.x0 + b.x1) / 2, b.h / 2, (b.z0 + b.z1) / 2);
       this.walls.add(m);
     }
     s.add(this.walls);
 
-    const body = new THREE.MeshStandardMaterial({ color: 0x3a4a6a });
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.9, 0.35), body);
-    torso.position.y = 1.15; torso.userData.part = 'body';
-    const legs = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.3), new THREE.MeshStandardMaterial({ color: 0x2a3550 }));
-    legs.position.y = 0.35; legs.userData.part = 'body';
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 12), new THREE.MeshStandardMaterial({ color: 0xd9a77a }));
-    head.position.y = 1.72; head.userData.part = 'head';
-    const awp = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 1.3), new THREE.MeshStandardMaterial({ color: 0x1d1d1d }));
-    awp.position.set(0.25, 1.25, 0.5); awp.userData.part = 'body';
-    this.enemyParts = [torso, legs, head, awp];
-    this.enemy.add(...this.enemyParts);
+    const bot = ctBot();
+    this.enemyParts = bot.parts;
+    this.enemy.add(bot.group);
     this.enemy.rotation.y = 0; // faces +z (toward the player)
     this.scene.add(this.enemy);
+    // The viewmodel rides the camera, so the camera has to be in the scene.
+    this.scene.add(this.camera);
+    this.camera.add(this.viewmodel);
     this.placeEnemy();
   }
 
@@ -181,6 +212,7 @@ export class Game {
     const w = this.el.clientWidth, h = this.el.clientHeight;
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
+    this.camera.fov = 2 * Math.atan(Math.tan((HFOV * DEG) / 2) / this.camera.aspect) / DEG;
     this.camera.updateProjectionMatrix();
   };
 
@@ -195,8 +227,8 @@ export class Game {
   private onBlur = () => { this.keys.clear(); };
   private onMouse = (e: MouseEvent) => {
     if (!this.hud.locked) return;
-    this.yaw -= e.movementX * 0.0022;
-    this.pitch = Math.max(-1.4, Math.min(1.4, this.pitch - e.movementY * 0.0022));
+    this.yaw -= e.movementX * this.sens;
+    this.pitch = Math.max(-1.4, Math.min(1.4, this.pitch - e.movementY * this.sens));
   };
   private onLock = () => {
     this.hud.locked = document.pointerLockElement === this.renderer.domElement;
@@ -211,10 +243,11 @@ export class Game {
   // --- player combat ---
   private fire() {
     const now = performance.now();
-    if (this.hud.over || this.hud.reloading || this.hud.ammo <= 0 || now - this.lastFire < 100) return;
+    if (this.hud.over || this.hud.reloading || this.hud.ammo <= 0 || now - this.lastFire < FIRE_INTERVAL_MS) return;
     this.lastFire = now;
     this.hud.ammo--;
-    if (this.hud.ammo === 0) { this.hud.reloading = true; this.reloadAt = now + RELOAD_MS; }
+    this.kick = 1;
+    if (this.hud.ammo === 0) { this.startReload(now); }
 
     // Accuracy is the player's movement, same rule the bot plays by.
     const spread = playerSpread(this.speed);
@@ -239,6 +272,11 @@ export class Game {
     this.tracer(from, end, 0xffe066);
     this.pitch += 0.008;
     this.emit();
+  }
+
+  private startReload(now: number) {
+    if (this.hud.reserve <= 0) return;
+    this.hud.reloading = true; this.reloadAt = now + RELOAD_MS;
   }
 
   private killEnemy() {
@@ -273,7 +311,7 @@ export class Game {
     // The machine owns where the bot is going; `peeking` is the only state it moves in.
     if (value !== was) {
       if (value === 'holding') this.etTarget = 0;
-      else if (value === 'peeking') this.etTarget = 1;
+      else if (value === 'peeking') { this.etTarget = 1; this.arrivalSent = false; }
       // counterStrafe lands here part way out: stop dead where the body is.
       else if (was === 'peeking') this.etTarget = this.et;
     }
@@ -305,6 +343,7 @@ export class Game {
     const e = this.enemyEye();
     const from = new THREE.Vector3(e.x, EYE, e.z);
     const to = new THREE.Vector3(this.px, EYE - 0.2, this.pz);
+    this.bolting = true; this.boltReadyAt = performance.now() + BOLT_MS;
     const vis = this.visible();
     // `scoped` means standing still, so this agrees with the state Jev decided in.
     const chance = awpHitChance({
@@ -324,7 +363,7 @@ export class Game {
   }
 
   private syncEnemy(now: number) {
-    if (now - this.lastSync < 200 || this.hud.over) return;
+    if (now - this.lastSync < 50 || this.hud.over) return;
     this.lastSync = now;
     const dist = Math.hypot(this.px - this.enemy.position.x, this.pz - ENEMY_HOLD.z);
     const vis = this.visible();
@@ -337,6 +376,7 @@ export class Game {
       heardFootsteps: this.speed > FOOTSTEP_SPEED && dist < FOOTSTEP_RANGE,
       sinceSeen: this.lastSeenAt === null ? -1 : (now - this.lastSeenAt) / 1000,
       roundLeft: this.hud.time,
+      onTarget: this.visibleSince === null ? 0 : (now - this.visibleSince) / 1000,
     };
     // Only resend when something Jev actually reads has changed, at its own
     // resolution. The distance divisor tracks `metres()` in enemyMachine.ts.
@@ -345,6 +385,7 @@ export class Game {
       playerDistance: Math.round(dist / 2),
       sinceSeen: Math.round(patch.sinceSeen / 2),
       roundLeft: Math.round(patch.roundLeft / 5),
+      onTarget: aimBucket(patch.onTarget),
     });
     if (key !== this.lastCtx) { this.lastCtx = key; this.actor.send({ type: 'world.sync', ...patch }); }
   }
@@ -368,7 +409,17 @@ export class Game {
     this.camera.position.set(this.px, this.hud.over === 'lose' ? 0.5 : EYE, this.pz);
     this.camera.rotation.set(this.pitch, this.yaw, this.hud.over === 'lose' ? 0.6 : 0, 'YXZ');
 
-    if (this.hud.reloading && now >= this.reloadAt) { this.hud.reloading = false; this.hud.ammo = MAG; }
+    this.animateViewmodel(dt);
+
+    if (this.hud.reloading && now >= this.reloadAt) {
+      const load = Math.min(MAG, this.hud.reserve);
+      this.hud.reserve -= load; this.hud.ammo = load; this.hud.reloading = false;
+    }
+    // The world reports what a real engine would: the weapon is ready again.
+    if (this.bolting && now >= this.boltReadyAt && !this.hud.over) {
+      this.bolting = false;
+      this.actor.send({ type: 'world.weaponReady' });
+    }
 
     if (alive && this.hud.locked) {
       this.elapsed += dt;
@@ -382,6 +433,10 @@ export class Game {
       const step = dt / (PEEK_MS / 1000);
       this.et = this.et < this.etTarget ? Math.min(this.etTarget, this.et + step) : Math.max(this.etTarget, this.et - step);
       this.placeEnemy();
+      if (this.hud.enemyState === 'peeking' && this.et >= this.etTarget && this.etTarget > 0 && !this.arrivalSent) {
+        this.arrivalSent = true;
+        this.actor.send({ type: 'world.arrived' });
+      }
     }
     // Time on target, tracked at frame rate: breaking line of sight resets the
     // bot's aim, which is what makes jiggling and re-peeking worth anything.
@@ -406,6 +461,23 @@ export class Game {
       };
       this.emit();
     }
+  }
+
+  /** Walk bob, fire kick and reload dip on the AK, and the crosshair gap that tracks movement. */
+  private animateViewmodel(dt: number) {
+    this.bob += this.speed * dt * 2.2;
+    this.kick = Math.max(0, this.kick - dt * 9);
+    const sway = Math.min(1, this.speed / MAX_SPEED);
+    const dip = this.hud.reloading ? 0.16 : 0;
+    this.viewmodel.position.set(
+      0.2 + Math.sin(this.bob) * 0.012 * sway,
+      -0.2 - Math.abs(Math.cos(this.bob)) * 0.014 * sway - dip,
+      -0.38 + this.kick * 0.05,
+    );
+    this.viewmodel.rotation.set(0.02 + this.kick * 0.06 + (this.hud.reloading ? -0.5 : 0), 0.05, 0);
+    this.viewmodel.visible = this.hud.over !== 'lose';
+    // CS 1.6: the cross opens with the same inaccuracy that spreads the bullets.
+    this.hud.gap = Math.round(4 + playerSpread(this.speed) * 900);
   }
 
   /** Quake-style ground movement: accelerate toward the wish direction, friction otherwise. Counter-strafing works. */

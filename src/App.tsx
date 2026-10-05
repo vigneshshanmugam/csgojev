@@ -26,9 +26,9 @@ export function App() {
 }
 
 const OVER_TEXT = {
-  win: 'YOU WON THE DUEL',
-  lose: 'AWPed. YOU DIED',
-  time: 'ROUND OVER — TIME RAN OUT',
+  win: 'Counter-Terrorists win',
+  lose: 'Terrorists win. You were AWPed',
+  time: 'Round draw. Time ran out',
 } as const;
 
 function Overlay({ game }: { game: Game }) {
@@ -39,13 +39,16 @@ function Overlay({ game }: { game: Game }) {
   const clock = `${Math.floor(h.time / 60)}:${String(h.time % 60).padStart(2, '0')}`;
   return (
     <div className="hud">
-      <div className="crosshair" />
+      <div className="crosshair" style={{ ['--gap' as string]: `${h.gap}px` }}>
+        <i className="l" /><i className="r" /><i className="t" /><i className="b" />
+      </div>
       {now - h.hit < 150 && <div className="hitmarker">✕</div>}
       {now - h.damaged < 400 && <div className="damage" />}
       <div className="clock">{clock}</div>
-      <div className="bottom-left">
-        <div className="hp">HP {h.hp}</div>
-        <div className="ammo">{h.reloading ? 'RELOADING…' : `AMMO ${h.ammo} / 30`}</div>
+      <div className="cs-hp"><span className="cross">+</span> <b>{h.hp}</b></div>
+      <div className="cs-ammo">
+        {h.reloading && <small>RELOADING</small>}
+        <b>{h.ammo}</b> <span>/ {h.reserve}</span>
       </div>
       <div className="jev">
         <div className="title">Enemy AWPer, driven by Jev {h.live ? '' : '(MOCK, no API key)'}</div>
@@ -71,7 +74,7 @@ function Overlay({ game }: { game: Game }) {
       {!h.locked && !h.over && (
         <div className="splash" onClick={() => game.lock()}>
           Click to play
-          <br /><small>WASD move · Shift walk · Click shoot · R restart</small>
+          <br /><small>WASD move · Shift walk · Click fire (AK-47) · R restart</small>
         </div>
       )}
       {h.over && (
