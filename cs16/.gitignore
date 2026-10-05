@@ -13,5 +13,7 @@ plugin/mapgeom.h
 map/jev_duel.map
 # Benchmark output, appended by bench.sh
 bench-results.tsv
+# Brain comparison logs and reports, written by compare.sh
+runs/
 # Navmesh learned on de_dust2 during early bring-up; nothing loads it now
 gamedata/maps/de_dust2.nav

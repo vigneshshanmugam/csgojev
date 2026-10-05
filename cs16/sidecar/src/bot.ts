@@ -43,6 +43,16 @@ export interface BotOptions {
   /** The aim gate, in seconds on target. 0 turns it off, which is what the eval compares against. */
   aimSeconds?: number;
   log?: (message: string) => void;
+  /** Every decision the runtime made, cached repeats included. */
+  onDecision?: (decision: JevDecision) => void;
+  /** Every state change and shot, i.e. what the bot actually did next. */
+  onMove?: (move: Move) => void;
+}
+
+export interface Move {
+  from: MachineState;
+  to: MachineState;
+  fired: boolean;
 }
 
 /** Coarse enough that small jitter in the feed does not re-ask Jev the same question. */
@@ -60,7 +70,7 @@ function syncKey(patch: Partial<EnemyContext>): string {
   });
 }
 
-export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log }: BotOptions) {
+export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log, onDecision, onMove }: BotOptions) {
   let actor: Actor<ReturnType<typeof createEnemyMachine>> | null = null;
   let state: MachineState = 'holding';
   let shots = 0;
@@ -89,6 +99,7 @@ export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log 
         stats.decisions++;
         if (d.event) stats.acted++;
         if (!d.cached && !d.mock) stats.latencies.push(d.latencyMs);
+        onDecision?.(d);
         log?.(`bot ${id} jev ${d.reason}: ${d.event?.type ?? '—'} ${Math.round(d.confidence * 100)}%${d.cached ? ' (cached)' : ` ${d.latencyMs}ms`}`);
       }
     });
@@ -116,6 +127,7 @@ export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log 
       if (value === 'peeking' && value !== state) arrivalSent = false;
       if (value === state && !fired) return;
       if (value !== state) log?.(`bot ${id} ${state} -> ${value}`);
+      onMove?.({ from: state, to: value, fired });
       state = value;
       send(fired);
     });

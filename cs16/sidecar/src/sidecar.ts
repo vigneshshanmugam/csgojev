@@ -4,9 +4,9 @@
  * world and the machine is the brain.
  */
 import dgram from 'node:dgram';
-import type { JevClient } from '@xstate/jev';
-import { createBot, type Bot } from './bot';
-import { HOST, INTENT_PORT, OBS_PORT, decode, encode, inboundSchema, type Intent } from './protocol';
+import type { JevClient, JevDecision } from '@xstate/jev';
+import { createBot, type Bot, type Move } from './bot';
+import { HOST, INTENT_PORT, OBS_PORT, decode, encode, inboundSchema, type Inbound, type Intent } from './protocol';
 
 export interface SidecarOptions {
   client: JevClient;
@@ -19,6 +19,10 @@ export interface SidecarOptions {
   /** The aim gate, in seconds on target. 0 turns it off; see `createBot`. */
   aimSeconds?: number;
   log?: (message: string) => void;
+  /** Sees every packet from the plugin, before the bot does: the run log hooks in here. */
+  onPacket?: (packet: Inbound) => void;
+  onDecision?: (bot: number, decision: JevDecision) => void;
+  onMove?: (bot: number, move: Move) => void;
 }
 
 export interface Sidecar {
@@ -37,6 +41,9 @@ export async function startSidecar(options: SidecarOptions): Promise<Sidecar> {
     heartbeatMs = 1000,
     aimSeconds,
     log,
+    onPacket,
+    onDecision,
+    onMove,
   } = options;
 
   const socket = dgram.createSocket('udp4');
@@ -47,7 +54,15 @@ export async function startSidecar(options: SidecarOptions): Promise<Sidecar> {
   const botFor = (id: number): Bot => {
     let bot = bots.get(id);
     if (!bot) {
-      bot = createBot({ id, client, emit, aimSeconds, log });
+      bot = createBot({
+        id,
+        client,
+        emit,
+        aimSeconds,
+        log,
+        onDecision: onDecision && ((d) => onDecision(id, d)),
+        onMove: onMove && ((m) => onMove(id, m)),
+      });
       bots.set(id, bot);
       bot.start();
     }
@@ -55,7 +70,10 @@ export async function startSidecar(options: SidecarOptions): Promise<Sidecar> {
   };
 
   socket.on('message', (datagram) => {
-    for (const packet of decode(inboundSchema, datagram)) botFor(packet.bot).handle(packet);
+    for (const packet of decode(inboundSchema, datagram)) {
+      onPacket?.(packet);
+      botFor(packet.bot).handle(packet);
+    }
   });
 
   await new Promise<void>((resolve, reject) => {

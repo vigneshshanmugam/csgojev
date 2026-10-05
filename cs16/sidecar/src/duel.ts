@@ -5,7 +5,9 @@
  *   pnpm duel:cs            # 1 round, rusher, mock Jev unless TYPESAFE_API_KEY is set
  *   pnpm duel:cs 5 jiggler  # rounds, behaviour
  *   pnpm duel:cs 5 rusher --no-aim-gate   # same rounds with the aim gate off, to compare against
+ *   BRAIN=rule pnpm duel:cs 5             # a baseline brain instead of Jev (see brains.ts)
  */
+import type { BrainName } from './brains';
 import { makeClient } from './jevClient';
 import { startSidecar } from './sidecar';
 import { openFakePlugin, type Behaviour, type RoundReport } from './fakePlugin';
@@ -14,8 +16,9 @@ const rounds = Number(process.argv[2] ?? 1);
 const behaviour = (process.argv[3] as Behaviour) ?? 'rusher';
 const aimGate = !process.argv.includes('--no-aim-gate');
 
-const { client, live } = await makeClient();
-console.log(live ? '(live Jev)' : '(no TYPESAFE_API_KEY: mock Jev)');
+const brain = (process.env.BRAIN ?? 'jev') as BrainName;
+const { client, live } = await makeClient(brain);
+console.log(brain !== 'jev' ? `(brain: ${brain})` : live ? '(live Jev)' : '(no TYPESAFE_API_KEY: mock Jev)');
 
 // Both ends ephemeral so a duel never collides with a real sidecar on 27100.
 const plugin = await openFakePlugin({ sidecarPort: 0, listenPort: 0, behaviour, roundSeconds: 30, log: (m) => console.log(m) });

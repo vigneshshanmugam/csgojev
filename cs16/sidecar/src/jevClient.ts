@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { mockAnswers, type JevClient } from '@xstate/jev';
+import { randomClient, ruleClient, rushChoice, type BrainName } from './brains';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -30,9 +31,16 @@ export interface ClientHandle {
   live: boolean;
 }
 
-/** Real Jev when a key is present, the mock otherwise, so the sidecar always runs. */
-export async function makeClient(): Promise<ClientHandle> {
-  const key = envKey();
+/**
+ * The decision-maker. `jev` is real Jev when a key is present and the mock
+ * otherwise, so the sidecar always runs; `rule` and `random` are the
+ * baselines it is compared against (see brains.ts).
+ */
+export async function makeClient(brain: BrainName = 'jev'): Promise<ClientHandle> {
+  if (brain === 'rule') return { client: ruleClient(), live: false };
+  if (brain === 'rush') return { client: ruleClient(rushChoice), live: false };
+  if (brain === 'random') return { client: randomClient(), live: false };
+  const key = brain === 'mock' ? undefined : envKey();
   if (!key) return { client: async (request) => mockAnswers(request), live: false };
   const { TypeSafeClient } = await import('@typesafe-ai/sdk');
   const ts = new TypeSafeClient({ apiKey: key, timeout: 30_000 });
