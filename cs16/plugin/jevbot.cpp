@@ -46,6 +46,20 @@ static const float HOLD_X = PROTO_HOLD_X * UNITS_PER_METRE;
 static const float HOLD_Y = PROTO_HOLD_Y * UNITS_PER_METRE;
 static const float PEEK_X = PROTO_PEEK_X * UNITS_PER_METRE;
 static const float PEEK_Y = PROTO_PEEK_Y * UNITS_PER_METRE;
+static const float SPLIT_HX = SPLIT_HOLD_X * UNITS_PER_METRE;
+static const float SPLIT_HY = SPLIT_HOLD_Y * UNITS_PER_METRE;
+static const float SPLIT_PLX = SPLIT_PEEK_L_X * UNITS_PER_METRE;
+static const float SPLIT_PLY = SPLIT_PEEK_L_Y * UNITS_PER_METRE;
+static const float SPLIT_PRX = SPLIT_PEEK_R_X * UNITS_PER_METRE;
+static const float SPLIT_PRY = SPLIT_PEEK_R_Y * UNITS_PER_METRE;
+static const float SPLIT_ROUTE_X[2][3] = {
+	{ SPLIT_LEFT_0_X * UNITS_PER_METRE, SPLIT_LEFT_1_X * UNITS_PER_METRE, SPLIT_LEFT_2_X * UNITS_PER_METRE },
+	{ SPLIT_RIGHT_0_X * UNITS_PER_METRE, SPLIT_RIGHT_1_X * UNITS_PER_METRE, SPLIT_RIGHT_2_X * UNITS_PER_METRE },
+};
+static const float SPLIT_ROUTE_Y[2][3] = {
+	{ SPLIT_LEFT_0_Y * UNITS_PER_METRE, SPLIT_LEFT_1_Y * UNITS_PER_METRE, SPLIT_LEFT_2_Y * UNITS_PER_METRE },
+	{ SPLIT_RIGHT_0_Y * UNITS_PER_METRE, SPLIT_RIGHT_1_Y * UNITS_PER_METRE, SPLIT_RIGHT_2_Y * UNITS_PER_METRE },
+};
 
 // Within this of a waypoint the bot counts as standing on it, which is what
 // ends a peek swing on the sidecar.
@@ -83,6 +97,7 @@ static float g_lastSelect = 0.0f;
 static float g_armedAt = 0.0f;
 
 static float g_lastSeen = -1.0f;
+static int g_lastSeenSide = -1;
 static bool g_preaim = true;
 static float g_onTarget = 0.0f;
 static float g_lastShot = -100.0f;
@@ -99,7 +114,7 @@ static float g_obsInterval = 0.05f;
 static int g_obsSent = 0;
 static int g_intentsRx = 0;
 
-enum MState { MS_HOLDING, MS_PEEKING, MS_SCOPED, MS_CYCLING, MS_DEAD, MS_VICTORY, MS_TIMEOUT };
+enum MState { MS_HOLDING, MS_PEEKING, MS_PEEKING_L, MS_PEEKING_R, MS_SCOPED, MS_CYCLING, MS_DEAD, MS_VICTORY, MS_TIMEOUT };
 static MState g_mstate = MS_HOLDING;
 static int g_lastSeq = -1;
 static bool g_firePending = false;
@@ -112,6 +127,11 @@ static float g_roundLen = ROUND_SECONDS;
 static int g_roundsLeft = 0;
 static int g_roundNo = 0;
 static int g_wins = 0, g_losses = 0, g_draws = 0;
+enum ZRouteMode { ZR_OFF, ZR_LEFT, ZR_RIGHT, ZR_RANDOM };
+static ZRouteMode g_zRouteMode = ZR_OFF;
+static int g_zRoute = -1;
+static int g_zRouteLeg = 0;
+static unsigned int g_zRouteSeed = 1;
 
 static void Say(const char *fmt, ...)
 {
@@ -228,14 +248,47 @@ static bool IsZBot(edict_t *e)
 	return e && !FNullEnt(e) && e != g_bot && (e->v.flags & FL_FAKECLIENT);
 }
 
+static bool SplitMap();
+static bool Alive(edict_t *p);
+static bool EyeVisible(edict_t *from, edict_t *to);
+
+static bool DriveZRoute(edict_t *fakeclient, const float *viewangles, float upmove, unsigned short buttons, byte impulse, byte msec)
+{
+	if (!SplitMap() || g_zRoute < 0 || g_phase != PH_LIVE)
+		return false;
+	if (Alive(g_bot) && EyeVisible(fakeclient, g_bot))
+		return false;
+
+	if (g_zRouteLeg < 2) {
+		float dx0 = SPLIT_ROUTE_X[g_zRoute][g_zRouteLeg] - fakeclient->v.origin.x;
+		float dy0 = SPLIT_ROUTE_Y[g_zRoute][g_zRouteLeg] - fakeclient->v.origin.y;
+		if (sqrtf(dx0 * dx0 + dy0 * dy0) < ARRIVE_RADIUS)
+			g_zRouteLeg++;
+	}
+
+	float dx = SPLIT_ROUTE_X[g_zRoute][g_zRouteLeg] - fakeclient->v.origin.x;
+	float dy = SPLIT_ROUTE_Y[g_zRoute][g_zRouteLeg] - fakeclient->v.origin.y;
+	float d = sqrtf(dx * dx + dy * dy);
+	float fmove = 0.0f, smove = 0.0f;
+	if (d > ARRIVE_RADIUS) {
+		float y = viewangles[1] * (float)M_PI / 180.0f;
+		fmove = ((dx * cosf(y) + dy * sinf(y)) / d) * 250.0f;
+		smove = ((dx * sinf(y) - dy * cosf(y)) / d) * 250.0f;
+	}
+	(*g_engfuncs.pfnRunPlayerMove)(fakeclient, viewangles, fmove, smove, upmove, buttons, impulse, msec);
+	return true;
+}
+
 static void RunPlayerMove(edict_t *fakeclient, const float *viewangles, float forwardmove, float sidemove,
 	float upmove, unsigned short buttons, byte impulse, byte msec)
 {
 	if (!IsZBot(fakeclient))
 		RETURN_META(MRES_IGNORED);
 	g_zMoves++;
-	if (!g_zHold)
+	if (!g_zHold && !DriveZRoute(fakeclient, viewangles, upmove, buttons, impulse, msec))
 		RETURN_META(MRES_IGNORED);
+	if (!g_zHold)
+		RETURN_META(MRES_SUPERCEDE);
 	g_zHeld++;
 	(*g_engfuncs.pfnRunPlayerMove)(fakeclient, viewangles, 0.0f, 0.0f, upmove, buttons, impulse, msec);
 	RETURN_META(MRES_SUPERCEDE);
@@ -257,6 +310,24 @@ static void cmd_jev_zhold()
 			p->v.weaponmodel ? STRING(p->v.weaponmodel) : "none", (int)p->v.button);
 	}
 	Say("[jev] zhold=%d zbots=%d moves=%d held=%d", g_zHold ? 1 : 0, n, g_zMoves, g_zHeld);
+}
+
+static void cmd_jev_zroute()
+{
+	if (CMD_ARGC() > 1) {
+		const char *mode = CMD_ARGV(1);
+		if (!strcmp(mode, "left")) g_zRouteMode = ZR_LEFT;
+		else if (!strcmp(mode, "right")) g_zRouteMode = ZR_RIGHT;
+		else if (!strcmp(mode, "random")) g_zRouteMode = ZR_RANDOM;
+		else g_zRouteMode = ZR_OFF;
+	}
+	if (CMD_ARGC() > 2)
+		g_zRouteSeed = (unsigned int)atoi(CMD_ARGV(2));
+	const char *mode =
+		g_zRouteMode == ZR_LEFT ? "left" :
+		g_zRouteMode == ZR_RIGHT ? "right" :
+		g_zRouteMode == ZR_RANDOM ? "random" : "off";
+	Say("[jev] zroute=%s seed=%u current=%s", mode, g_zRouteSeed, g_zRoute < 0 ? "none" : (g_zRoute ? "right" : "left"));
 }
 
 // The game DLL's GiveNamedItem is not reachable from a Metamod plugin, so the
@@ -426,12 +497,37 @@ static float FlatDist(float x, float y)
 	return sqrtf(dx * dx + dy * dy);
 }
 
+static bool SplitMap()
+{
+	return !strcmp(STRING(gpGlobals->mapname), "jev_split");
+}
+
+static void HoldPoint(float *x, float *y)
+{
+	if (SplitMap()) { *x = SPLIT_HX; *y = SPLIT_HY; }
+	else { *x = HOLD_X; *y = HOLD_Y; }
+}
+
+static void PeekPoint(int side, float *x, float *y)
+{
+	if (!SplitMap()) { *x = PEEK_X; *y = PEEK_Y; return; }
+	if (side > 0) { *x = SPLIT_PRX; *y = SPLIT_PRY; }
+	else { *x = SPLIT_PLX; *y = SPLIT_PLY; }
+}
+
 static const char *Waypoint()
 {
-	float dh = FlatDist(HOLD_X, HOLD_Y);
-	float dp = FlatDist(PEEK_X, PEEK_Y);
+	float hx, hy, lx, ly, rx, ry;
+	HoldPoint(&hx, &hy);
+	PeekPoint(0, &lx, &ly);
+	PeekPoint(1, &rx, &ry);
+	float dh = FlatDist(hx, hy);
+	float dl = FlatDist(lx, ly);
+	float dr = FlatDist(rx, ry);
 
-	if (dp <= ARRIVE_RADIUS && dp <= dh) return "peek";
+	if (!SplitMap() && dl <= ARRIVE_RADIUS && dl <= dh) return "peek";
+	if (SplitMap() && dl <= ARRIVE_RADIUS && dl <= dr && dl <= dh) return "peekLeft";
+	if (SplitMap() && dr <= ARRIVE_RADIUS && dr <= dl && dr <= dh) return "peekRight";
 	if (dh <= ARRIVE_RADIUS) return "hold";
 	return NULL;
 }
@@ -482,6 +578,8 @@ static void BridgeEvent(const char *type, const char *result)
 
 	if (result)
 		snprintf(buf, sizeof(buf), "{\"t\":\"%s\",\"bot\":%d,\"result\":\"%s\"}\n", type, g_botId, result);
+	else if (!strcmp(type, "round_start") && g_zRoute >= 0)
+		snprintf(buf, sizeof(buf), "{\"t\":\"%s\",\"bot\":%d,\"route\":\"%s\"}\n", type, g_botId, g_zRoute ? "right" : "left");
 	else
 		snprintf(buf, sizeof(buf), "{\"t\":\"%s\",\"bot\":%d}\n", type, g_botId);
 	BridgeSend(buf);
@@ -578,6 +676,8 @@ static bool JsonTrue(const char *line, const char *key)
 static MState StateFromName(const char *name)
 {
 	if (!strcmp(name, "peeking")) return MS_PEEKING;
+	if (!strcmp(name, "peekingLeft")) return MS_PEEKING_L;
+	if (!strcmp(name, "peekingRight")) return MS_PEEKING_R;
 	if (!strcmp(name, "scoped")) return MS_SCOPED;
 	if (!strcmp(name, "cycling")) return MS_CYCLING;
 	if (!strcmp(name, "dead")) return MS_DEAD;
@@ -631,7 +731,7 @@ static void PumpIntents()
 
 static void SendObs()
 {
-	char buf[512];
+	char buf[768];
 
 	bool enemyAlive = Alive(g_enemy);
 	bool visible = enemyAlive && EyeVisible(g_bot, g_enemy);
@@ -642,12 +742,16 @@ static void SendObs()
 	float since = g_lastSeen < 0.0f ? -1.0f : gpGlobals->time - g_lastSeen;
 	float left = g_phase == PH_LIVE ? g_roundLen - (gpGlobals->time - g_roundStart) : g_roundLen;
 	const char *wp = Waypoint();
+	bool footsteps = enemySpeed > FOOTSTEP_SPEED_MPS * UNITS_PER_METRE && dist < FOOTSTEP_RANGE_M;
+	int side = g_enemy && !FNullEnt(g_enemy) && g_enemy->v.origin.x > 0.0f ? 1 : 0;
+	const char *footSide = SplitMap() && footsteps ? (side ? "\"right\"" : "\"left\"") : "null";
+	const char *seenSide = SplitMap() && g_lastSeenSide >= 0 ? (g_lastSeenSide ? "\"right\"" : "\"left\"") : "null";
 
 	if (left < 0.0f) left = 0.0f;
 
 	snprintf(buf, sizeof(buf),
 		"{\"t\":\"obs\",\"bot\":%d,\"hp\":%.0f,\"visible\":%s,\"moving\":%s,\"dist\":%.1f,"
-		"\"enemyHp\":%.0f,\"footsteps\":%s,\"sinceSeen\":%.2f,\"roundLeft\":%.1f,"
+		"\"enemyHp\":%.0f,\"footsteps\":%s,\"footstepsFrom\":%s,\"sinceSeen\":%.2f,\"lastSeenSide\":%s,\"roundLeft\":%.1f,"
 		"\"weaponReady\":%s,\"atWaypoint\":%s,\"onTarget\":%.2f}\n",
 		g_botId,
 		g_bot->v.health < 0.0f ? 0.0f : g_bot->v.health,
@@ -655,12 +759,13 @@ static void SendObs()
 		enemySpeed > MOVING_MPS * UNITS_PER_METRE ? "true" : "false",
 		dist,
 		enemyAlive ? g_enemy->v.health : 0.0f,
-		(enemySpeed > FOOTSTEP_SPEED_MPS * UNITS_PER_METRE && dist < FOOTSTEP_RANGE_M)
-			? "true" : "false",
+		footsteps ? "true" : "false",
+		footSide,
 		since,
+		seenSide,
 		left,
 		WeaponReady() ? "true" : "false",
-		wp ? (strcmp(wp, "peek") == 0 ? "\"peek\"" : "\"hold\"") : "null",
+		wp ? (strcmp(wp, "peek") == 0 ? "\"peek\"" : strcmp(wp, "peekLeft") == 0 ? "\"peekLeft\"" : strcmp(wp, "peekRight") == 0 ? "\"peekRight\"" : "\"hold\"") : "null",
 		g_onTarget);
 
 	BridgeSend(buf);
@@ -724,6 +829,8 @@ static void PreAim(float dt)
 	Vector p;
 	if (g_lastSeen >= 0.0f && gpGlobals->time - g_lastSeen < 4.0f) {
 		p = g_lastSeenAt;
+	} else if (SplitMap()) {
+		p = Vector(SPLIT_SPAWN_X * UNITS_PER_METRE, SPLIT_SPAWN_Y * UNITS_PER_METRE, 53.0f);
 	} else {
 		p = Vector(PROTO_SPAWN_X * UNITS_PER_METRE, PROTO_SPAWN_Y * UNITS_PER_METRE, 53.0f);
 	}
@@ -751,14 +858,14 @@ static void DriveBot(float dt, int ms)
 	switch (g_mstate) {
 	case MS_HOLDING:
 		walking = true;
-		wpX = HOLD_X;
-		wpY = HOLD_Y;
+		HoldPoint(&wpX, &wpY);
 		PreAim(dt);
 		break;
 	case MS_PEEKING:
+	case MS_PEEKING_L:
+	case MS_PEEKING_R:
 		walking = true;
-		wpX = PEEK_X;
-		wpY = PEEK_Y;
+		PeekPoint(g_mstate == MS_PEEKING_R ? 1 : 0, &wpX, &wpY);
 		PreAim(dt);
 		break;
 	case MS_SCOPED:
@@ -819,6 +926,7 @@ static const float RESTART_WAIT_SECONDS = 1.5f;
 static void ResetRoundState()
 {
 	g_lastSeen = -1.0f;
+	g_lastSeenSide = -1;
 	g_onTarget = 0.0f;
 	g_lastShot = -100.0f;
 	g_burstUntil = -100.0f;
@@ -828,6 +936,17 @@ static void ResetRoundState()
 	g_firePending = false;
 	g_yaw = 90.0f;
 	g_pitch = 0.0f;
+	g_zRouteLeg = 0;
+	if (!SplitMap() || g_zRouteMode == ZR_OFF) {
+		g_zRoute = -1;
+	} else if (g_zRouteMode == ZR_LEFT) {
+		g_zRoute = 0;
+	} else if (g_zRouteMode == ZR_RIGHT) {
+		g_zRoute = 1;
+	} else {
+		g_zRouteSeed = g_zRouteSeed * 1664525u + 1013904223u;
+		g_zRoute = (g_zRouteSeed >> 31) & 1;
+	}
 }
 
 static void FinishRound(const char *result)
@@ -1216,6 +1335,7 @@ static void StartFrame()
 			if (see) {
 				g_lastSeen = now;
 				g_lastSeenAt = g_enemy->v.origin + g_enemy->v.view_ofs;
+				g_lastSeenSide = g_enemy->v.origin.x > 0.0f ? 1 : 0;
 			}
 			bool still = g_bot->v.velocity.Length2D() < 20.0f;
 			g_onTarget = (see && still && CrosshairOn(g_enemy)) ? g_onTarget + dt : 0.0f;
@@ -1305,8 +1425,9 @@ C_DLLEXPORT int Meta_Attach(PLUG_LOADTIME now, META_FUNCTIONS *pFunctionTable, m
 	REG_SVR_COMMAND("jev_watch", cmd_jev_watch);
 	REG_SVR_COMMAND("jev_burst", cmd_jev_burst);
 	REG_SVR_COMMAND("jev_zhold", cmd_jev_zhold);
+	REG_SVR_COMMAND("jev_zroute", cmd_jev_zroute);
 	Say("[jev] plugin attached: jev_spawn, jev_where, jev_give, jev_cmd, jev_spoof, "
-		"jev_bridge, jev_duel, jev_stop, jev_report, jev_tune");
+		"jev_bridge, jev_duel, jev_stop, jev_report, jev_tune, jev_zhold, jev_zroute");
 	return TRUE;
 }
 
