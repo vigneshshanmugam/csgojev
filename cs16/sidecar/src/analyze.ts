@@ -35,13 +35,26 @@ type Move = Extract<Line, { t: 'move' }>;
 export interface BrainRun {
   brain: string;
   meta: Record<string, unknown>;
-  rounds: Array<{ round: number; slot: string; result: 'win' | 'loss' | 'draw'; seconds: number }>;
+  rounds: Array<{
+    round: number;
+    slot: string;
+    /** 1-based position within its block (one sidecar run). */
+    index: number;
+    /** Seconds from round start to the first peek; null if it never peeked. */
+    firstPeekS: number | null;
+    result: 'win' | 'loss' | 'draw';
+    seconds: number;
+  }>;
   decisions: Decision[];
   moves: Move[];
 }
 
 /** How soon after the answer a state change still counts as its consequence. */
 const NEXT_MOVE_MS = 1500;
+/** A first peek this soon counts as peeking at once (matches bot.ts). */
+const AT_ONCE_S = 1.5;
+/** Rounds at the start of a block, before memory has anything to say. */
+const EARLY_ROUNDS = 3;
 
 // ------------------------------------------------------------------ maths
 
@@ -106,10 +119,14 @@ export function readRun(path: string, offset = 0): BrainRun {
     .filter((l): l is Extract<Line, { t: 'decision' }> => l.t === 'decision' && results.has(l.round) && !!l.situation && !!l.choice)
     .map((d) => ({ ...d, round: d.round + offset, result: results.get(d.round)!.result }) as Decision);
   const slot = meta.slot === undefined ? '-' : String(meta.slot);
+  const firstPeek = (round: number) => {
+    const m = lines.find((l): l is Move => l.t === 'move' && l.round === round && l.to === 'peeking');
+    return m && starts.has(round) ? (m.at - starts.get(round)!) / 1000 : null;
+  };
   return {
     brain: String(meta.brain),
     meta,
-    rounds: [...results].map(([round, r]) => ({ round: round + offset, slot, ...r })),
+    rounds: [...results].map(([round, r], i) => ({ round: round + offset, slot, index: i + 1, firstPeekS: firstPeek(round), ...r })),
     decisions,
     moves: lines.filter((l): l is Move => l.t === 'move' && results.has(l.round)).map((m) => ({ ...m, round: m.round + offset })),
   };
@@ -232,6 +249,32 @@ export function report(runs: BrainRun[]): string {
     }
   }
 
+  out.push('## Opening', '');
+  out.push(
+    `"At once" is a first peek within ${AT_ONCE_S}s of the round starting. Early and late split each block at round ${EARLY_ROUNDS}: ` +
+      'a brain that adapts to the opponent should open differently late than early.',
+    '',
+  );
+  out.push(
+    table(
+      ['brain', 'peeked at once', `rounds 1-${EARLY_ROUNDS}`, `rounds ${EARLY_ROUNDS + 1}+`, 'won after peeking at once', 'won after waiting'],
+      runs.map((r) => {
+        const atOnce = (x: BrainRun['rounds'][number]) => x.firstPeekS !== null && x.firstPeekS <= AT_ONCE_S;
+        const share = (rs: BrainRun['rounds']) => (rs.length ? `${pct(rs.filter(atOnce).length / rs.length)} of ${rs.length}` : '-');
+        const won = (rs: BrainRun['rounds']) => (rs.length ? `${pct(rs.filter((x) => x.result === 'win').length / rs.length)} of ${rs.length}` : '-');
+        return [
+          r.brain,
+          share(r.rounds),
+          share(r.rounds.filter((x) => x.index <= EARLY_ROUNDS)),
+          share(r.rounds.filter((x) => x.index > EARLY_ROUNDS)),
+          won(r.rounds.filter(atOnce)),
+          won(r.rounds.filter((x) => !atOnce(x))),
+        ];
+      }),
+    ),
+    '',
+  );
+
   out.push('## From decision to move', '');
   out.push(
     `A decision is "acted" when it chose a move rather than waiting, and "delivered" when the machine took it. ` +
@@ -352,7 +395,7 @@ export function report(runs: BrainRun[]): string {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const dir = process.argv[2];
   if (!dir) throw new Error('usage: analyze.ts <run dir>');
-  const order = ['jev', 'rule', 'rush', 'random', 'mock'];
+  const order = ['jev', 'jevmem', 'rule', 'rush', 'rushhold', 'random', 'mock'];
   const runs = mergeRuns(
     readdirSync(dir)
       .filter((f) => f.endsWith('.jsonl'))

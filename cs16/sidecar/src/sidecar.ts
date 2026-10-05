@@ -23,6 +23,8 @@ export interface SidecarOptions {
   onPacket?: (packet: Inbound) => void;
   onDecision?: (bot: number, decision: JevDecision) => void;
   onMove?: (bot: number, move: Move) => void;
+  /** Show each bot's brain how its recent rounds went. */
+  memory?: boolean;
 }
 
 export interface Sidecar {
@@ -44,6 +46,7 @@ export async function startSidecar(options: SidecarOptions): Promise<Sidecar> {
     onPacket,
     onDecision,
     onMove,
+    memory,
   } = options;
 
   const socket = dgram.createSocket('udp4');
@@ -62,6 +65,7 @@ export async function startSidecar(options: SidecarOptions): Promise<Sidecar> {
         log,
         onDecision: onDecision && ((d) => onDecision(id, d)),
         onMove: onMove && ((m) => onMove(id, m)),
+        memory,
       });
       bots.set(id, bot);
       bot.start();

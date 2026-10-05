@@ -27,6 +27,11 @@ export interface EnemyTiming {
   aimSeconds?: number;
   /** Seconds at which aim is fully settled. Only describes the shot to Jev. Defaults to twice `aimSeconds`. */
   aimSettledSeconds?: number;
+  /**
+   * How earlier rounds against this opponent went, one line each, newest last.
+   * Shown to Jev when given, so it can drop a plan that keeps losing.
+   */
+  memory?: () => readonly string[];
 }
 
 /**
@@ -109,6 +114,11 @@ const AIM_SYS = [
   'fully settled it is a kill. The aim cue tells you which you are holding.',
 ].join(' ');
 
+const MEMORY_SYS = [
+  'You play this same opponent round after round. earlierRounds says how your last rounds went: how you opened and how each ended.',
+  'Opponents differ: some push into you, some hold their own angle and punish an early peek. If a plan keeps losing, change it.',
+].join(' ');
+
 /**
  * Distance in 2m steps: enough for a tactical read, coarse enough that the
  * request is stable. 5m was right for the 68m lane; on a 23m one it left only
@@ -152,7 +162,7 @@ export function createEnemyMachine(client: JevClient, timing: EnemyTiming = {}) 
     actors: {
       jev: createJevLogic({
         events: 'enemy.*',
-        instructions: aimSeconds > 0 ? `${SYS} ${AIM_SYS}` : SYS,
+        instructions: [SYS, aimSeconds > 0 ? AIM_SYS : '', timing.memory ? MEMORY_SYS : ''].filter(Boolean).join(' '),
         noop: 'stay behind the pillar and wait. Nothing can hit you, but you see nothing, you cannot shoot, and the rifler walks a few metres closer to clearing your angle.',
         client,
         lookahead: true,
@@ -180,6 +190,7 @@ export function createEnemyMachine(client: JevClient, timing: EnemyTiming = {}) 
             yourHp: c.hp,
             playerHp: c.playerHp,
             roundSecondsLeft: Math.round(c.roundLeft / 5) * 5,
+            ...(timing.memory ? { earlierRounds: timing.memory().length ? timing.memory() : 'none yet' } : {}),
           };
         },
       }),

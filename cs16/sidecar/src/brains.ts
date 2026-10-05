@@ -8,10 +8,13 @@
  *   rule    a hand-written AWPer: fixed if/then rules over the same cues
  *   rush    the aggressive AWPer: peek at once, scope up at the peek spot,
  *           otherwise the rule brain. Tests whether Jev beats "be aggressive".
+ *   rushhold  rush that never falls back while scoped (see rushHoldChoice)
  */
 import { NOOP_ID, type JevAnswer, type JevClient, type JevRequest } from '@xstate/jev';
 
-export const brains = ['jev', 'rule', 'rush', 'random', 'mock'] as const;
+export const brains = ['jev', 'jevmem', 'rule', 'rush', 'rushhold', 'random', 'mock'] as const;
+/** Brains that call Jev, and so need a key to mean anything. */
+export const isJev = (brain: string) => brain === 'jev' || brain === 'jevmem';
 export type BrainName = (typeof brains)[number];
 
 /** What `createEnemyMachine` shows the brain. Mirrors its `state` callback. */
@@ -77,6 +80,16 @@ export function rushChoice(s: Situation, offered: readonly string[]): string {
   if (s.you === 'holding' && offered.includes(PEEK)) return PEEK;
   if (s.you === 'peeking' && offered.includes(STRAFE)) return STRAFE;
   return ruleChoice(s, offered);
+}
+
+/**
+ * Rush with one rule removed: it never falls back while scoped, hurt or not,
+ * so the scope time already spent is never thrown away. The only difference
+ * from `rush`, so a gap between the two is that rule's doing.
+ */
+export function rushHoldChoice(s: Situation, offered: readonly string[]): string {
+  const choice = rushChoice(s, offered);
+  return s.you === 'scoped' && choice === FALL_BACK && offered.includes(NOOP_ID) ? NOOP_ID : choice;
 }
 
 /** Answers every choice question with `pick`, in exactly the shape Jev returns. */

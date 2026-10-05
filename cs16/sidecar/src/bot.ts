@@ -47,6 +47,26 @@ export interface BotOptions {
   onDecision?: (decision: JevDecision) => void;
   /** Every state change and shot, i.e. what the bot actually did next. */
   onMove?: (move: Move) => void;
+  /** Show the brain how its last rounds went (see `roundSummary`). */
+  memory?: boolean;
+}
+
+/** Rounds of history shown to the brain. */
+export const MEMORY_ROUNDS = 5;
+/** A first peek this soon after the round starts counts as peeking at once. */
+const AT_ONCE_S = 1.5;
+
+/** One line of history: how the round opened and how it ended. */
+export function roundSummary(
+  firstPeekS: number | null,
+  result: 'win' | 'loss' | 'draw',
+  diedWhile: MachineState | null,
+): string {
+  const opened =
+    firstPeekS === null ? 'never peeked' : firstPeekS <= AT_ONCE_S ? 'peeked at once' : `waited ${Math.round(firstPeekS)}s, then peeked`;
+  const ended =
+    result === 'win' ? 'won' : result === 'draw' ? 'draw, the timer ran out' : `lost, killed while ${diedWhile ?? 'unknown'}`;
+  return `${opened}; ${ended}`;
 }
 
 export interface Move {
@@ -70,7 +90,7 @@ function syncKey(patch: Partial<EnemyContext>): string {
   });
 }
 
-export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log, onDecision, onMove }: BotOptions) {
+export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log, onDecision, onMove, memory }: BotOptions) {
   let actor: Actor<ReturnType<typeof createEnemyMachine>> | null = null;
   let state: MachineState = 'holding';
   let shots = 0;
@@ -84,6 +104,11 @@ export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log,
   let weaponBusySeen = false;
   const stats: BotStats = { decisions: 0, acted: 0, latencies: [] };
   const seenDecisions = new Set<number>();
+  /** Persists across rounds; replaced, never mutated, so a round's requests stay stable. */
+  let history: readonly string[] = [];
+  let roundStartedAt = Date.now();
+  let firstPeekS: number | null = null;
+  let diedWhile: MachineState | null = null;
 
   const send = (fire: boolean) => {
     const intent: Intent = { t: 'intent', bot: id, state, fire, seq: ++seq };
@@ -113,11 +138,15 @@ export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log,
     lastSync = '';
     arrivalSent = true;
     weaponBusySeen = false;
+    roundStartedAt = Date.now();
+    firstPeekS = null;
+    diedWhile = null;
     actor = createActor(createEnemyMachine(client, {
       peekMs: PEEK_SAFETY_MS,
       boltMs: BOLT_SAFETY_MS,
       aimSeconds,
       aimSettledSeconds: AIM_SETTLED_SECONDS,
+      ...(memory ? { memory: () => history } : {}),
     }));
     actor.subscribe((snapshot) => {
       const value = String(snapshot.value) as MachineState;
@@ -125,6 +154,7 @@ export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log,
       shots = snapshot.context.shots;
       if (fired) weaponBusySeen = false;
       if (value === 'peeking' && value !== state) arrivalSent = false;
+      if (value === 'peeking' && firstPeekS === null) firstPeekS = (Date.now() - roundStartedAt) / 1000;
       if (value === state && !fired) return;
       if (value !== state) log?.(`bot ${id} ${state} -> ${value}`);
       onMove?.({ from: state, to: value, fired });
@@ -176,6 +206,9 @@ export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log,
     if (packet.t === 'round_start') return start();
     if (!actor) start();
     if (packet.t === 'obs') return applyObs(packet);
+    if (packet.t === 'bot_died') diedWhile = state;
+    // Recorded even after the actor finished: the result is the plugin's to give.
+    if (packet.t === 'round_end') history = [...history, roundSummary(firstPeekS, packet.result, diedWhile)].slice(-MEMORY_ROUNDS);
     if (actor!.getSnapshot().status !== 'active') return;
     if (packet.t === 'bot_died') actor!.send({ type: 'world.enemyDead' });
     else if (packet.t === 'enemy_died') actor!.send({ type: 'world.playerDead' });
@@ -189,6 +222,7 @@ export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log,
     /** 1Hz keepalive so the plugin always knows the current state. */
     heartbeat: () => send(false),
     state: () => state,
+    history: () => history,
     stats: () => ({ ...stats, latencies: [...stats.latencies] }),
     stop: () => actor?.stop(),
   };

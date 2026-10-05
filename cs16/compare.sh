@@ -58,10 +58,13 @@ if [ "$ZHOLD" != 0 ]; then
   fi
 fi
 
+block=0
 for brain in $BRAINS; do
   stop_sidecar
-  # Per slot, so slots running in parallel into one RUN_DIR never share a file.
-  RUN="$RUN_DIR/$brain-s$SLOT"
+  block=$((block + 1))
+  # Per slot and block, so parallel slots and a brain repeated on one slot
+  # never share a file (each file numbers its rounds from 1).
+  RUN="$RUN_DIR/$brain-s$SLOT-b$block"
   (cd "$ROOT" && BRAIN="$brain" RUN_LOG="$RUN.jsonl" RUN_META="$META" \
     exec "$ROOT/node_modules/.bin/tsx" cs16/sidecar/src/main.ts) > "$RUN.sidecar.log" 2>&1 &
   SIDECAR_PID=$!

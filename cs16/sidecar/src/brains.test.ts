@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { NOOP_ID, type JevRequest } from '@xstate/jev';
-import { RULES, randomClient, ruleChoice, ruleClient, rushChoice, type Situation } from './brains';
+import { RULES, randomClient, ruleChoice, ruleClient, rushChoice, rushHoldChoice, type Situation } from './brains';
 import { openRunLog } from './runLog';
-import { createBot } from './bot';
+import { MEMORY_ROUNDS, createBot, roundSummary } from './bot';
 import type { Inbound } from './protocol';
 
 const base: Situation = {
@@ -69,6 +69,18 @@ describe('rush brain', () => {
   });
 });
 
+describe('rush-hold brain', () => {
+  it('differs from rush only by never falling back while scoped', () => {
+    const hurt = at({ you: 'scoped', playerInSight: true, aim: 'still settling, no shot yet', yourHp: 20 });
+    const offered = ['enemy.fallBack', NOOP_ID];
+    expect(rushChoice(hurt, offered)).toBe('enemy.fallBack');
+    expect(rushHoldChoice(hurt, offered)).toBe(NOOP_ID);
+    expect(rushHoldChoice({ ...hurt, aim: 'settled, your best shot' }, ['enemy.shoot', ...offered])).toBe('enemy.shoot');
+    expect(rushHoldChoice(at({ you: 'cycling' }), offered)).toBe('enemy.fallBack');
+    expect(rushHoldChoice(base, ['enemy.peek', NOOP_ID])).toBe('enemy.peek');
+  });
+});
+
 describe('random brain', () => {
   it('picks uniformly among the offered moves only', async () => {
     const options = ['enemy.shoot', 'enemy.fallBack', NOOP_ID];
@@ -81,6 +93,46 @@ describe('random brain', () => {
       seen.add(answer.choice);
     }
     expect(seen.size).toBe(3);
+  });
+});
+
+describe('memory', () => {
+  it('summarises how a round opened and ended', () => {
+    expect(roundSummary(0.4, 'win', null)).toBe('peeked at once; won');
+    expect(roundSummary(7.6, 'loss', 'scoped')).toBe('waited 8s, then peeked; lost, killed while scoped');
+    expect(roundSummary(null, 'draw', null)).toBe('never peeked; draw, the timer ran out');
+  });
+
+  it('shows the brain earlier rounds, newest last, capped, and only when asked', async () => {
+    const seen: unknown[] = [];
+    const client: typeof ruleClient extends () => infer C ? C : never = async (request) => {
+      seen.push((request.state as { earlierRounds?: unknown }).earlierRounds);
+      return ruleClient()(request);
+    };
+    const obs = { t: 'obs', bot: 1, hp: 100, visible: false, moving: false, dist: 20, enemyHp: 100, footsteps: true, sinceSeen: -1, roundLeft: 60, weaponReady: true, atWaypoint: 'hold' } as const;
+    const settle = () => new Promise((r) => setTimeout(r, 400));
+
+    const bot = createBot({ id: 1, client, emit: () => {}, memory: true });
+    for (let i = 0; i < MEMORY_ROUNDS + 1; i++) {
+      bot.handle({ t: 'round_start', bot: 1 });
+      bot.handle(obs);
+      await settle();
+      bot.handle({ t: 'bot_died', bot: 1 });
+      bot.handle({ t: 'round_end', bot: 1, result: 'loss' });
+    }
+    bot.stop();
+    expect(seen[0]).toBe('none yet');
+    expect(bot.history()).toHaveLength(MEMORY_ROUNDS);
+    expect(bot.history().at(-1)).toMatch(/^peeked at once; lost, killed while (peeking|scoped)$/);
+    expect(seen.at(-1)).toHaveLength(MEMORY_ROUNDS);
+
+    const plain: unknown[] = [];
+    const control = createBot({ id: 2, client: async (r) => (plain.push(r.state), ruleClient()(r)), emit: () => {} });
+    control.handle({ t: 'round_start', bot: 2 });
+    control.handle({ ...obs, bot: 2 });
+    await settle();
+    control.stop();
+    expect(plain[0]).not.toHaveProperty('earlierRounds');
   });
 });
 
