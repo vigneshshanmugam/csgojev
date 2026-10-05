@@ -75,12 +75,14 @@ To isolate Jev, `cs16/compare.sh` swaps only the decision-maker (`cs16/sidecar/s
 | Pilot, 20 rounds each | AWP vs AWP, Hard | jev 15-5, rush 13-7, rule 7-13, random 7-13 |
 | Balanced, 21 rounds each | AWP vs AWP, Expert, three slots | jev 13-8, rule 12-9, rush 11-10 |
 | Lever check, 100 rounds each | AWP vs M4A1, Expert, four slots | rush 56, rule 55 (3 draws) |
+| Lever check, held zBot, 400 rounds each | AWP vs M4A1, Expert, `jev_zhold 1`, four slots | rush 216-81-103, rule 193-104-103 |
 
 What the runs show:
 
 - The pilot's gap between Jev and `rule` (p=0.025) disappeared once brains were balanced across slots. It was mostly a slot effect.
 - In the balanced run, Jev against `rush` is +9.5 points (p=0.76) and against `rule` is +4.8 points (p=1.0). Both are noise, and detecting a gap that size would take over 400 rounds per brain.
 - In the lever check, `rush` and `rule` tied (z=0.14), so the opening policy is not a lever in this duel. That run stopped for futility at the first look, which rules out gaps of about 15 points or more, not smaller ones.
+- Against a held zBot, which aims and fires but never advances, `rush` and `rule` did not separate either: 54% against 48% over 400 rounds each (z=1.63, not significant at the cap). The trend favours `rush` again, the same way as against a pushing zBot, so different opponents don't want different openings. A quarter of those rounds were draws, because one zBot spawn sat out of sight of the peek spot. That spawn has since been moved.
 - Jev opens like `rush`: it peeks from cover every round. Where it departs from the rules it does so at 30 to 45% confidence.
 - Falling back while hurt comes up in about 5% of rounds, so it cannot move the overall win rate by more than about 5 points.
 
@@ -90,7 +92,12 @@ What is not tested:
 - Jev steering the shipped zBot itself. A spike showed that `jev_zhold` can pin a zBot while it keeps aiming and firing. The design for the full experiment is in [`cs16/STEERING.md`](cs16/STEERING.md), and its `stock` arm may hit the same lack of a lever.
 - Cross-round adaptation. Jev sees each situation fresh and is not told how earlier rounds went. A `jevmem` brain exists but is parked.
 
-The next step is to change the game so choices matter more: a mixed schedule of rushing and held zBots, or a richer duel with more peek lines.
+The opening is not a lever at Expert, whether the zBot pushes or holds, so a mixed schedule of the two has nothing to adapt to. What is left:
+
+- A richer duel, with several peek lines, repositioning, and timing against footsteps, so that the choices have room to matter.
+- A rifler brain for Jev, so that it plays the other seat.
+- The zBot-steering experiment, which now looks less promising for the same reason.
+- Writing this up as a null: Jev reaches script-level play without hand-written rules, and this duel can't tell it apart from scripts.
 
 ## Two places to watch it
 
