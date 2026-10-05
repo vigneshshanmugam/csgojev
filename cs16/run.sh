@@ -3,15 +3,14 @@
 #
 #   cs16/run.sh              # container cs16-jev, HTTP :27036, WebRTC :27038
 #   cs16/run.sh say "cmd"    # send one server-console command
+#   SLOT=1 cs16/run.sh       # a second, isolated server (see slot.sh)
 #
-# The map is docker-cp'd, never bind-mounted (PLAN 0.10). The console is a FIFO
-# fed to `docker attach` (PLAN 0.9); it must stay open or the engine sees EOF.
+# The map is docker-cp'd, never bind-mounted (README gotcha 8). The console is a FIFO
+# fed to `docker attach` (README gotcha 11); it must stay open or the engine sees EOF.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NAME=${NAME:-cs16-jev}
-HTTP=${HTTP:-27036}
-PORT=${PORT:-27038}
+. "$HERE/slot.sh"
 IMAGE="ghcr.io/balintsoos/cs16-web-server:latest"
 FIFO="/tmp/$NAME.in"
 
@@ -31,11 +30,12 @@ if command -v lsof >/dev/null; then
 fi
 pkill -f "tail -f $FIFO" 2>/dev/null || true
 rm -f "$FIFO"; mkfifo "$FIFO"
+mkdir -p "$HERE/logs/$NAME"
 
 docker run -d -i --name "$NAME" --platform linux/386 \
   -e IP=127.0.0.1 -e PORT="$PORT" \
-  -p "$HTTP":27016 -p "$PORT":"$PORT"/tcp -p "$PORT":"$PORT"/udp -p 127.0.0.1:27101:27101/udp \
-  -v "$HERE/logs":/xashds/cstrike/logs \
+  -p "$HTTP":27016 -p "$PORT":"$PORT"/tcp -p "$PORT":"$PORT"/udp -p 127.0.0.1:"$INTENT":27101/udp \
+  -v "$HERE/logs/$NAME":/xashds/cstrike/logs \
   -v "$HERE/overlay/addons":/xashds/cstrike/addons \
   -v "$HERE/overlay/liblist.gam":/xashds/cstrike/liblist.gam:ro \
   -v "$HERE/gamedata/BotProfile.db":/xashds/cstrike/BotProfile.db:ro \
@@ -52,9 +52,9 @@ PY
 docker cp "$HERE/map/out/jev_duel.bsp" "$NAME":/xashds/cstrike/maps/jev_duel.bsp
 docker exec -u 0 "$NAME" chown 999:999 /xashds/cstrike/maps/jev_duel.bsp
 # Server runs as uid 1000 and writes <map>.bsp.ztmp here when a browser joins;
-# without write access it segfaults (PLAN 0.10).
+# without write access it segfaults (README gotcha 8).
 docker exec -u 0 "$NAME" chmod 777 /xashds/cstrike/maps
-# Cached navmesh (learned once; PLAN 0.15). Must be world-readable, in cstrike/maps.
+# Cached navmesh (learned once; README gotcha 4). Must be world-readable, in cstrike/maps.
 if [ -f "$HERE/gamedata/maps/jev_duel.nav" ]; then
   docker cp "$HERE/gamedata/maps/jev_duel.nav" "$NAME":/xashds/cstrike/maps/jev_duel.nav
   docker exec -u 0 "$NAME" sh -c 'chown 999:999 /xashds/cstrike/maps/jev_duel.nav; chmod 644 /xashds/cstrike/maps/jev_duel.nav'
@@ -72,4 +72,4 @@ if command -v lsof >/dev/null; then
     exit 1
   fi
 fi
-echo "up: http://localhost:$HTTP  console: cs16/run.sh say '<cmd>'"
+echo "up: $NAME http://localhost:$HTTP  console: SLOT=$SLOT cs16/run.sh say '<cmd>'  sidecar: SLOT=$SLOT pnpm sidecar"

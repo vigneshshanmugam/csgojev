@@ -39,7 +39,7 @@ plugin_info_t Plugin_info = {
 // Waypoints, round length and footstep thresholds are generated from
 // src/game/map.ts by geom.sh, so rescaling the prototype rescales the plugin
 // instead of silently leaving it on the old map.
-// proto.x -> x, proto.z -> y, times units/metre, no offsets (PLAN 0.13).
+// proto.x -> x, proto.z -> y, times units/metre, no offsets (README: Design notes, Units).
 #include "mapgeom.h"
 
 static const float HOLD_X = PROTO_HOLD_X * UNITS_PER_METRE;
@@ -72,8 +72,10 @@ static float g_watch = 0.0f;
 static float g_lastWatchAt = 0.0f;
 static bool g_enemyWasAlive = false;
 static float g_enemyArmAt = 0.0f;
-static char g_enemyWeapon[32] = "weapon_m4a1";
-static char g_enemyAmmo[32] = "ammo_556nato";
+// One weapon for both sides, so a result is about the decision layer and not
+// about the loadout. Set with `jev_weapon <weapon_x> [ammo_y]`.
+static char g_weapon[32] = "weapon_awp";
+static char g_ammo[32] = "ammo_338magnum";
 static float g_lastSelect = 0.0f;
 static float g_armedAt = 0.0f;
 
@@ -228,46 +230,48 @@ static void GiveItem(edict_t *player, const char *classname)
 		REMOVE_ENTITY(item);
 }
 
-static bool HasAwpOut()
+static bool HasWeaponOut()
 {
-	return g_bot->v.weaponmodel && strstr(STRING(g_bot->v.weaponmodel), "awp") != NULL;
+	const char *name = g_weapon;
+	if (!strncmp(name, "weapon_", 7)) name += 7;
+	return g_bot->v.weaponmodel && strstr(STRING(g_bot->v.weaponmodel), name) != NULL;
 }
 
 static void ArmBot()
 {
-	GiveItem(g_bot, "weapon_awp");
-	GiveItem(g_bot, "ammo_338magnum");
-	GiveItem(g_bot, "ammo_338magnum");
-	FakeClientCommand(g_bot, "weapon_awp", "", "");
+	GiveItem(g_bot, g_weapon);
+	GiveItem(g_bot, g_ammo);
+	GiveItem(g_bot, g_ammo);
+	FakeClientCommand(g_bot, g_weapon, "", "");
 	g_armedAt = gpGlobals->time;
 }
 
 // The game DLL hands out the default pistol during spawn and selects it, which
 // can land after our give, so the selection is re-asserted until it sticks.
-static void KeepAwpOut()
+static void KeepWeaponOut()
 {
 	float now = gpGlobals->time;
 
-	if (HasAwpOut() || now - g_lastSelect < 0.5f)
+	if (HasWeaponOut() || now - g_lastSelect < 0.5f)
 		return;
 
 	g_lastSelect = now;
 	if (now - g_armedAt > 3.0f)
 		ArmBot();
 	else
-		FakeClientCommand(g_bot, "weapon_awp", "", "");
+		FakeClientCommand(g_bot, g_weapon, "", "");
 }
 
-// No buy zone on this map, so the zBot would hold a pistol against an AWP. The
-// duel the machine was written for is AWP against rifle.
+// No buy zone on this map, so the zBot would hold a pistol. It gets the same
+// weapon as Jev's bot.
 static void ArmEnemy(edict_t *enemy)
 {
-	if (!g_enemyWeapon[0])
+	if (!g_weapon[0])
 		return;
-	GiveItem(enemy, g_enemyWeapon);
-	GiveItem(enemy, g_enemyAmmo);
-	GiveItem(enemy, g_enemyAmmo);
-	FakeClientCommand(enemy, g_enemyWeapon, "", "");
+	GiveItem(enemy, g_weapon);
+	GiveItem(enemy, g_ammo);
+	GiveItem(enemy, g_ammo);
+	FakeClientCommand(enemy, g_weapon, "", "");
 }
 
 // ---------------------------------------------------------------- perception
@@ -382,9 +386,35 @@ static const char *Waypoint()
 	return NULL;
 }
 
+static bool IsSniper()
+{
+	return strstr(g_weapon, "awp") || strstr(g_weapon, "scout") ||
+		strstr(g_weapon, "sg550") || strstr(g_weapon, "g3sg1");
+}
+
+// Seconds between shots: the AWP and scout cycle a bolt, everything else is
+// bounded only by how fast a trigger can be pressed.
+static float CycleSeconds()
+{
+	if (strstr(g_weapon, "awp")) return BOLT_SECONDS;
+	if (strstr(g_weapon, "scout")) return 1.25f;
+	return 0.25f;
+}
+
+// Automatic weapons fire a burst per `fire`: the trigger is held for this long
+// (a standing M4 lands ~5 rounds in 0.45s). Bolt-action weapons ignore it.
+static float g_burst = 0.45f;
+static float g_burstUntil = -100.0f;
+
+static float BurstSeconds()
+{
+	return IsSniper() ? 0.0f : g_burst;
+}
+
 static bool WeaponReady()
 {
-	return (gpGlobals->time - g_lastShot) >= BOLT_SECONDS;
+	float now = gpGlobals->time;
+	return now >= g_burstUntil && (now - g_lastShot) >= CycleSeconds();
 }
 
 // ------------------------------------------------------------------- bridge
@@ -695,7 +725,7 @@ static void DriveBot(float dt, int ms)
 
 	// The scope is the AWP's accuracy, so it is kept in whenever the bot is
 	// armed; unscoping needs two presses on a three-step zoom and buys nothing.
-	if (g_scope && (g_bot->v.fov == 0.0f || g_bot->v.fov > 40.0f) &&
+	if (g_scope && IsSniper() && (g_bot->v.fov == 0.0f || g_bot->v.fov > 40.0f) &&
 			gpGlobals->time - g_lastZoom > 0.5f) {
 		buttons |= IN_ATTACK2;
 		g_lastZoom = gpGlobals->time;
@@ -706,8 +736,11 @@ static void DriveBot(float dt, int ms)
 		if (WeaponReady()) {
 			buttons |= IN_ATTACK;
 			g_lastShot = gpGlobals->time;
+			g_burstUntil = g_lastShot + BurstSeconds();
 			g_shots++;
 		}
+	} else if (gpGlobals->time < g_burstUntil && Alive(g_enemy)) {
+		buttons |= IN_ATTACK;
 	}
 
 	float angles[3] = { g_pitch, g_yaw, 0.0f };
@@ -725,6 +758,7 @@ static void ResetRoundState()
 	g_lastSeen = -1.0f;
 	g_onTarget = 0.0f;
 	g_lastShot = -100.0f;
+	g_burstUntil = -100.0f;
 	g_shots = 0;
 	g_mstate = MS_HOLDING;
 	g_lastSeq = -1;
@@ -893,6 +927,9 @@ static void cmd_jev_where()
 		g_bot->v.weaponmodel ? STRING(g_bot->v.weaponmodel) : "none");
 
 	if (g_enemy && !FNullEnt(g_enemy)) {
+		Say("[jev]   weapons: jev=%s enemy=%s",
+			g_bot->v.weaponmodel ? STRING(g_bot->v.weaponmodel) : "none",
+			g_enemy->v.weaponmodel ? STRING(g_enemy->v.weaponmodel) : "none");
 		Say("[jev]   enemy: origin=(%.1f %.1f %.1f) alive=%d see=%d crosshair=%d speed=%.0f botspeed=%.0f",
 			g_enemy->v.origin.x, g_enemy->v.origin.y, g_enemy->v.origin.z,
 			Alive(g_enemy) ? 1 : 0, EyeVisible(g_bot, g_enemy) ? 1 : 0,
@@ -988,17 +1025,32 @@ static void cmd_jev_report()
 		g_roundNo, g_wins, g_losses, g_draws, g_obsSent, g_intentsRx, (int)g_phase, (int)g_mstate);
 }
 
+static const char *AmmoFor(const char *weapon)
+{
+	if (strstr(weapon, "awp")) return "ammo_338magnum";
+	if (strstr(weapon, "scout") || strstr(weapon, "g3sg1")) return "ammo_762nato";
+	if (strstr(weapon, "m4a1") || strstr(weapon, "ak47") || strstr(weapon, "aug") ||
+			strstr(weapon, "sg552") || strstr(weapon, "sg550") || strstr(weapon, "galil") ||
+			strstr(weapon, "famas") || strstr(weapon, "m249")) return "ammo_556nato";
+	if (strstr(weapon, "deagle")) return "ammo_50ae";
+	return "ammo_9mm";
+}
+
 static void cmd_jev_arm_enemy()
 {
 	if (CMD_ARGC() > 1) {
-		strncpy(g_enemyWeapon, CMD_ARGV(1), sizeof(g_enemyWeapon) - 1);
-		g_enemyWeapon[sizeof(g_enemyWeapon) - 1] = '\0';
+		strncpy(g_weapon, CMD_ARGV(1), sizeof(g_weapon) - 1);
+		g_weapon[sizeof(g_weapon) - 1] = '\0';
+		strncpy(g_ammo, AmmoFor(g_weapon), sizeof(g_ammo) - 1);
+		g_ammo[sizeof(g_ammo) - 1] = '\0';
 	}
 	if (CMD_ARGC() > 2) {
-		strncpy(g_enemyAmmo, CMD_ARGV(2), sizeof(g_enemyAmmo) - 1);
-		g_enemyAmmo[sizeof(g_enemyAmmo) - 1] = '\0';
+		strncpy(g_ammo, CMD_ARGV(2), sizeof(g_ammo) - 1);
+		g_ammo[sizeof(g_ammo) - 1] = '\0';
 	}
-	Say("[jev] enemy gets %s / %s", g_enemyWeapon, g_enemyAmmo);
+	if (g_bot && !FNullEnt(g_bot))
+		ArmBot();
+	Say("[jev] both sides use %s / %s", g_weapon, g_ammo);
 }
 
 static void cmd_jev_tune()
@@ -1007,6 +1059,12 @@ static void cmd_jev_tune()
 	if (CMD_ARGC() > 2) g_scope = atoi(CMD_ARGV(2)) != 0;
 	if (CMD_ARGC() > 3) g_preaim = atoi(CMD_ARGV(3)) != 0;
 	Say("[jev] turnrate %.0f deg/s, scope %d, preaim %d", g_turnRate, g_scope ? 1 : 0, g_preaim ? 1 : 0);
+}
+
+static void cmd_jev_burst()
+{
+	if (CMD_ARGC() > 1) g_burst = (float)atof(CMD_ARGV(1));
+	Say("[jev] burst %.2fs (automatic weapons only)", g_burst);
 }
 
 static void cmd_jev_watch()
@@ -1062,7 +1120,7 @@ static void StartFrame()
 			ArmBot();
 		g_wasAlive = alive;
 		if (alive && g_joinStep == 0)
-			KeepAwpOut();
+			KeepWeaponOut();
 
 		// The game DLL clears and refills a spawning player's inventory, so an
 		// item handed over on the first live frame is thrown away again.
@@ -1161,8 +1219,10 @@ C_DLLEXPORT int Meta_Attach(PLUG_LOADTIME now, META_FUNCTIONS *pFunctionTable, m
 	REG_SVR_COMMAND("jev_stop", cmd_jev_stop);
 	REG_SVR_COMMAND("jev_report", cmd_jev_report);
 	REG_SVR_COMMAND("jev_arm_enemy", cmd_jev_arm_enemy);
+	REG_SVR_COMMAND("jev_weapon", cmd_jev_arm_enemy);
 	REG_SVR_COMMAND("jev_tune", cmd_jev_tune);
 	REG_SVR_COMMAND("jev_watch", cmd_jev_watch);
+	REG_SVR_COMMAND("jev_burst", cmd_jev_burst);
 	Say("[jev] plugin attached: jev_spawn, jev_where, jev_give, jev_cmd, jev_spoof, "
 		"jev_bridge, jev_duel, jev_stop, jev_report, jev_tune");
 	return TRUE;
