@@ -46,6 +46,8 @@ export async function makeClient(brain: BrainName = 'jev'): Promise<ClientHandle
   if (brain === 'cue') return { client: ruleClient(cueChoice), live: false };
   if (brain === 'cuehold') return { client: ruleClient(cueHoldChoice), live: false };
   if (brain === 'cueswitch') return { client: cueSwitchClient(), live: false };
+  if (brain === 'cueswitch5') return { client: cueSwitchClient(undefined, 5), live: false };
+  if (brain === 'cueswitch7') return { client: cueSwitchClient(undefined, 7), live: false };
   if (brain === 'sweep') return { client: sweepClient(), live: false };
   if (brain === 'random') return { client: randomClient(), live: false };
   const key = brain === 'mock' ? undefined : envKey();

@@ -15,7 +15,7 @@
  */
 import { NOOP_ID, type JevAnswer, type JevClient, type JevRequest } from '@xstate/jev';
 
-export const brains = ['jev', 'jevmem', 'rule', 'rush', 'rushhold', 'left', 'right', 'cue', 'cuehold', 'cueswitch', 'sweep', 'random', 'mock'] as const;
+export const brains = ['jev', 'jevmem', 'rule', 'rush', 'rushhold', 'left', 'right', 'cue', 'cuehold', 'cueswitch', 'cueswitch5', 'cueswitch7', 'sweep', 'random', 'mock'] as const;
 /** Brains that call Jev, and so need a key to mean anything. */
 export const isJev = (brain: string) => brain === 'jev' || brain === 'jevmem';
 export type BrainName = (typeof brains)[number];
@@ -173,7 +173,7 @@ export function createSweepChoice(now: () => number = () => Date.now() / 1000): 
 
 /**
  * Cue reader that cross-checks itself: it peeks the cued lane like `cuehold`,
- * but a lane that shows nothing for SWEEP_SIDE_SECONDS is dropped (fall back)
+ * but a lane that shows nothing for `switchAfterS` (default SWEEP_SIDE_SECONDS, which proved too eager on a mostly-true cue) is dropped (fall back)
  * and the other lane is tried. Built to measure headroom when the cue lies:
  * if this does not beat `cue` on a noisy cue, there is nothing for a smarter
  * brain to recover.
@@ -181,6 +181,7 @@ export function createSweepChoice(now: () => number = () => Date.now() / 1000): 
 export function createCueSwitchChoice(
   now: () => number = () => Date.now() / 1000,
   rand: () => number = Math.random,
+  switchAfterS: number = SWEEP_SIDE_SECONDS,
 ): (s: Situation, offered: readonly string[]) => string {
   let avoid: SplitSide | null = null;
   let active: { side: SplitSide; startedAt: number; sawPlayer: boolean } | null = null;
@@ -210,7 +211,7 @@ export function createCueSwitchChoice(
       active = { side: currentSide, startedAt: now(), sawPlayer: s.playerInSight };
     }
     if (active && s.playerInSight) active.sawPlayer = true;
-    if ((s.you.startsWith('peeking') || s.you === 'scoped') && active && !active.sawPlayer && now() - active.startedAt >= SWEEP_SIDE_SECONDS && has(FALL_BACK)) {
+    if ((s.you.startsWith('peeking') || s.you === 'scoped') && active && !active.sawPlayer && now() - active.startedAt >= switchAfterS && has(FALL_BACK)) {
       avoid = active.side;
       active = null;
       return FALL_BACK;
@@ -237,7 +238,8 @@ export const ruleClient = (choose = ruleChoice): JevClient => async (request) =>
     return { choice, probabilities: Object.fromEntries(offered.map((o) => [o, o === choice ? 1 : 0])) };
   });
 
-export const cueSwitchClient = (now?: () => number): JevClient => ruleClient(createCueSwitchChoice(now));
+export const cueSwitchClient = (now?: () => number, switchAfterS?: number): JevClient =>
+  ruleClient(createCueSwitchChoice(now, undefined, switchAfterS));
 
 export const sweepClient = (now?: () => number): JevClient => ruleClient(createSweepChoice(now));
 

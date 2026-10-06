@@ -117,6 +117,17 @@ describe('split-lane brains', () => {
     expect(choose(at({ footstepsFrom: 'left' }), splitCover)).toBe('enemy.peekRight');
   });
 
+  it('cueswitch waits as long as its own timer says', () => {
+    let t = 0;
+    const choose = createCueSwitchChoice(() => t, () => 0, 7);
+    choose(at({ footstepsFrom: 'left' }), splitCover);
+    const dry = at({ you: 'scoped', side: 'left', footstepsFrom: 'left' });
+    t = SWEEP_SIDE_SECONDS + 1;
+    expect(choose(dry, ['enemy.fallBack', NOOP_ID])).toBe(NOOP_ID);
+    t = 7;
+    expect(choose(dry, ['enemy.fallBack', NOOP_ID])).toBe('enemy.fallBack');
+  });
+
   it('cueswitch stays on a lane once it sees the player', () => {
     let t = 0;
     const choose = createCueSwitchChoice(() => t, () => 0);
