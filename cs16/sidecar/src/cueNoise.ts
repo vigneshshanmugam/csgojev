@@ -43,11 +43,16 @@ export function applyCue(
   return from;
 }
 
-/** `CUE_MISS`, `CUE_FLIP`, `CUE_SEED` from the environment; off unless one is set. */
+/**
+ * `CUE_MISS`, `CUE_FLIP`, `CUE_SEED` from the environment; off unless one is set.
+ * The slot is folded into the seed: every block restarts its round count, so a
+ * seed alone replays the same few rolls. Keyed on slot, both arms on a slot see
+ * the same rolls and the slots see different ones.
+ */
 export function cueNoiseFromEnv(env: Record<string, string | undefined> = process.env): CueNoise | undefined {
   const miss = Number(env.CUE_MISS ?? 0);
   const flip = Number(env.CUE_FLIP ?? 0);
   if (!(miss > 0 || flip > 0)) return undefined;
   if (miss < 0 || flip < 0 || miss + flip > 1) throw new Error('CUE_MISS and CUE_FLIP must be >= 0 and sum to at most 1');
-  return { miss, flip, seed: Number(env.CUE_SEED ?? 1) };
+  return { miss, flip, seed: Number(env.CUE_SEED ?? 1) * 1009 + Number(env.SLOT ?? 0) };
 }

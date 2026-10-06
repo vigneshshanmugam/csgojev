@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { NOOP_ID, type JevRequest } from '@xstate/jev';
-import { RULES, SWEEP_SIDE_SECONDS, createSweepChoice, cueChoice, cueHoldChoice, fixedSideChoice, randomClient, ruleChoice, ruleClient, rushChoice, rushHoldChoice, type Situation } from './brains';
+import { RULES, SWEEP_SIDE_SECONDS, createSweepChoice, cueChoice, cueHoldChoice, createCueSwitchChoice, fixedSideChoice, randomClient, ruleChoice, ruleClient, rushChoice, rushHoldChoice, type Situation } from './brains';
 import { openRunLog } from './runLog';
 import { MEMORY_ROUNDS, createBot, roundSummary } from './bot';
 import type { Inbound } from './protocol';
@@ -103,6 +103,28 @@ describe('split-lane brains', () => {
     expect(cueChoice(hurt, offered)).toBe('enemy.fallBack');
     expect(cueHoldChoice(hurt, offered)).toBe(NOOP_ID);
     expect(cueHoldChoice(at({ footstepsFrom: 'left' }), splitCover)).toBe('enemy.peekLeft');
+  });
+
+  it('cueswitch peeks the cue, drops a dry lane after a while, then tries the other', () => {
+    let t = 0;
+    const choose = createCueSwitchChoice(() => t, () => 0);
+    expect(choose(at({ footstepsFrom: 'left' }), splitCover)).toBe('enemy.peekLeft');
+    const dry = at({ you: 'scoped', side: 'left', footstepsFrom: 'left' });
+    expect(choose(dry, ['enemy.fallBack', NOOP_ID])).toBe(NOOP_ID);
+    t = SWEEP_SIDE_SECONDS;
+    expect(choose(dry, ['enemy.fallBack', NOOP_ID])).toBe('enemy.fallBack');
+    // the cue still says left, but that lane was dry
+    expect(choose(at({ footstepsFrom: 'left' }), splitCover)).toBe('enemy.peekRight');
+  });
+
+  it('cueswitch stays on a lane once it sees the player', () => {
+    let t = 0;
+    const choose = createCueSwitchChoice(() => t, () => 0);
+    choose(at({ footstepsFrom: 'left' }), splitCover);
+    const seen = at({ you: 'scoped', side: 'left', playerInSight: true });
+    choose(seen, ['enemy.fallBack', NOOP_ID]);
+    t = SWEEP_SIDE_SECONDS + 1;
+    expect(choose(seen, ['enemy.fallBack', NOOP_ID])).not.toBe('enemy.fallBack');
   });
 
   it('cue guesses on quiet or low clock only when no side cue exists', () => {

@@ -34,7 +34,10 @@ describe('cue noise', () => {
   });
 
   it('reads and validates the environment', () => {
-    expect(cueNoiseFromEnv({ CUE_MISS: '0.2', CUE_FLIP: '0.1', CUE_SEED: '9' })).toEqual({ miss: 0.2, flip: 0.1, seed: 9 });
+    expect(cueNoiseFromEnv({ CUE_MISS: '0.2', CUE_FLIP: '0.1', CUE_SEED: '9', SLOT: '3' })).toEqual({ miss: 0.2, flip: 0.1, seed: 9 * 1009 + 3 });
+    const rolls = (slot: string) => Array.from({ length: 25 }, (_, i) => cueCondition(cueNoiseFromEnv({ CUE_MISS: '0.25', CUE_FLIP: '0.25', SLOT: slot }), i + 1));
+    expect(rolls('3')).toEqual(rolls('3'));
+    expect(rolls('3')).not.toEqual(rolls('4'));
     expect(() => cueNoiseFromEnv({ CUE_MISS: '0.7', CUE_FLIP: '0.5' })).toThrow();
   });
 });

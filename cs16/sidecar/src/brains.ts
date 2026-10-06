@@ -15,7 +15,7 @@
  */
 import { NOOP_ID, type JevAnswer, type JevClient, type JevRequest } from '@xstate/jev';
 
-export const brains = ['jev', 'jevmem', 'rule', 'rush', 'rushhold', 'left', 'right', 'cue', 'cuehold', 'sweep', 'random', 'mock'] as const;
+export const brains = ['jev', 'jevmem', 'rule', 'rush', 'rushhold', 'left', 'right', 'cue', 'cuehold', 'cueswitch', 'sweep', 'random', 'mock'] as const;
 /** Brains that call Jev, and so need a key to mean anything. */
 export const isJev = (brain: string) => brain === 'jev' || brain === 'jevmem';
 export type BrainName = (typeof brains)[number];
@@ -171,6 +171,54 @@ export function createSweepChoice(now: () => number = () => Date.now() / 1000): 
   };
 }
 
+/**
+ * Cue reader that cross-checks itself: it peeks the cued lane like `cuehold`,
+ * but a lane that shows nothing for SWEEP_SIDE_SECONDS is dropped (fall back)
+ * and the other lane is tried. Built to measure headroom when the cue lies:
+ * if this does not beat `cue` on a noisy cue, there is nothing for a smarter
+ * brain to recover.
+ */
+export function createCueSwitchChoice(
+  now: () => number = () => Date.now() / 1000,
+  rand: () => number = Math.random,
+): (s: Situation, offered: readonly string[]) => string {
+  let avoid: SplitSide | null = null;
+  let active: { side: SplitSide; startedAt: number; sawPlayer: boolean } | null = null;
+  let lastRoundSecondsLeft: number | undefined;
+
+  return (s, offered) => {
+    const has = (id: string) => offered.includes(id);
+    const currentSide = splitSide(s.side);
+    if (lastRoundSecondsLeft !== undefined && s.roundSecondsLeft > lastRoundSecondsLeft) {
+      avoid = null;
+      active = null;
+    }
+    lastRoundSecondsLeft = s.roundSecondsLeft;
+
+    if (s.you === 'holding' && avoid && has(peekFor(otherSide(avoid)))) {
+      const side = otherSide(avoid);
+      active = { side, startedAt: now(), sawPlayer: false };
+      return peekFor(side);
+    }
+    const choice = cueHoldChoice(s, offered, rand);
+    if (s.you === 'holding' && (choice === PEEK_LEFT || choice === PEEK_RIGHT)) {
+      active = { side: choice === PEEK_LEFT ? 'left' : 'right', startedAt: now(), sawPlayer: false };
+      return choice;
+    }
+
+    if (currentSide && (!active || active.side !== currentSide)) {
+      active = { side: currentSide, startedAt: now(), sawPlayer: s.playerInSight };
+    }
+    if (active && s.playerInSight) active.sawPlayer = true;
+    if ((s.you.startsWith('peeking') || s.you === 'scoped') && active && !active.sawPlayer && now() - active.startedAt >= SWEEP_SIDE_SECONDS && has(FALL_BACK)) {
+      avoid = active.side;
+      active = null;
+      return FALL_BACK;
+    }
+    return choice;
+  };
+}
+
 /** Answers every choice question with `pick`, in exactly the shape Jev returns. */
 function answerWith(request: JevRequest, pick: (offered: string[]) => { choice: string; probabilities: Record<string, number> }) {
   const answers: Record<string, JevAnswer> = {};
@@ -188,6 +236,8 @@ export const ruleClient = (choose = ruleChoice): JevClient => async (request) =>
     const choice = choose(request.state as Situation, offered);
     return { choice, probabilities: Object.fromEntries(offered.map((o) => [o, o === choice ? 1 : 0])) };
   });
+
+export const cueSwitchClient = (now?: () => number): JevClient => ruleClient(createCueSwitchChoice(now));
 
 export const sweepClient = (now?: () => number): JevClient => ruleClient(createSweepChoice(now));
 
