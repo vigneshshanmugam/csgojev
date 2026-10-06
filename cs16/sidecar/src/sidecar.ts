@@ -3,6 +3,7 @@
  * actor per `bot` id. It holds no game state of its own — the plugin is the
  * world and the machine is the brain.
  */
+import type { CueNoise } from './cueNoise';
 import dgram from 'node:dgram';
 import type { JevClient, JevDecision } from '@xstate/jev';
 import { createBot, type Bot, type Move } from './bot';
@@ -27,6 +28,8 @@ export interface SidecarOptions {
   memory?: boolean;
   /** Map/machine layout. */
   layout?: 'duel' | 'split';
+  /** Corrupt the side cue (see cueNoise.ts). */
+  cueNoise?: CueNoise;
 }
 
 export interface Sidecar {
@@ -50,6 +53,7 @@ export async function startSidecar(options: SidecarOptions): Promise<Sidecar> {
     onMove,
     memory,
     layout = 'duel',
+    cueNoise,
   } = options;
 
   const socket = dgram.createSocket('udp4');
@@ -70,6 +74,7 @@ export async function startSidecar(options: SidecarOptions): Promise<Sidecar> {
         onMove: onMove && ((m) => onMove(id, m)),
         memory,
         layout,
+        cueNoise,
       });
       bots.set(id, bot);
       bot.start();

@@ -18,6 +18,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { JevClient, JevDecision } from '@xstate/jev';
 import type { Move } from './bot';
+import { cueCondition, type CueNoise } from './cueNoise';
 import type { Inbound } from './protocol';
 
 export interface RunLog {
@@ -42,7 +43,7 @@ export function fingerprint(value: unknown): string {
 
 const REMEMBERED = 500;
 
-export function openRunLog(path: string, meta: Record<string, unknown>): RunLog {
+export function openRunLog(path: string, meta: Record<string, unknown>, cueNoise?: CueNoise): RunLog {
   mkdirSync(dirname(path), { recursive: true });
   const write = (line: Record<string, unknown>) => appendFileSync(path, `${JSON.stringify(line)}\n`);
   const situations = new Map<string, unknown>();
@@ -80,7 +81,7 @@ export function openRunLog(path: string, meta: Record<string, unknown>): RunLog 
     },
     move: (bot, m) => write({ t: 'move', round, bot, at: Date.now(), ...m }),
     packet: (packet) => {
-      if (packet.t === 'round_start') write({ t: 'round_start', round: ++round, at: Date.now(), route: packet.route ?? null });
+      if (packet.t === 'round_start') write({ t: 'round_start', round: ++round, at: Date.now(), route: packet.route ?? null, ...(cueNoise ? { cue: cueCondition(cueNoise, round) } : {}) });
       else if (packet.t === 'bot_died') write({ t: 'death', round, who: 'bot', at: Date.now() });
       else if (packet.t === 'enemy_died') write({ t: 'death', round, who: 'enemy', at: Date.now() });
       else if (packet.t === 'round_end') write({ t: 'round_end', round, result: packet.result, at: Date.now() });

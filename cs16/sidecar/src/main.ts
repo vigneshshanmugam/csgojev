@@ -11,6 +11,7 @@
  * OBS and INTENT override the slot's ports, matching cs16/slot.sh. RUN_META is
  * a JSON object copied into the log's first line (body settings, opponent).
  */
+import { cueNoiseFromEnv } from './cueNoise';
 import { makeClient } from './jevClient';
 import { brains, isJev, type BrainName } from './brains';
 import { openRunLog } from './runLog';
@@ -31,8 +32,11 @@ if (isJev(brain) && !handle.live && process.env.RUN_LOG) {
 }
 console.log(isJev(brain) ? (handle.live ? `(live Jev${brain === 'jevmem' ? ', with memory' : ''})` : '(no TYPESAFE_API_KEY: mock Jev)') : `(brain: ${brain})`);
 
+const cueNoise = cueNoiseFromEnv();
+if (cueNoise) console.log(`(cue noise: miss ${cueNoise.miss}, flip ${cueNoise.flip}, seed ${cueNoise.seed})`);
+
 const runLog = process.env.RUN_LOG
-  ? openRunLog(process.env.RUN_LOG, { brain, live: handle.live, slot, ...JSON.parse(process.env.RUN_META ?? '{}') })
+  ? openRunLog(process.env.RUN_LOG, { brain, live: handle.live, slot, ...JSON.parse(process.env.RUN_META ?? '{}'), ...(cueNoise ? { cueNoise } : {}) }, cueNoise)
   : undefined;
 
 const sidecar = await startSidecar({
@@ -45,6 +49,7 @@ const sidecar = await startSidecar({
   onMove: runLog?.move,
   memory: brain === 'jevmem',
   layout,
+  cueNoise,
 });
 
 const stop = async () => {

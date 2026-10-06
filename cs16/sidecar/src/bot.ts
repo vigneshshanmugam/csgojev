@@ -3,6 +3,7 @@
  * `intent` packets. Everything the engine owns (arrival, bolt, death, round
  * end) arrives as an event; the machine only decides what is legal.
  */
+import { applyCue, cueCondition, type CueCondition, type CueNoise } from './cueNoise';
 import { createActor, type Actor } from 'xstate';
 import type { JevClient, JevDecision } from '@xstate/jev';
 import { ACQUIRE_SECONDS, MIN_AIM_SECONDS, aimBucket } from '../../../src/game/combat';
@@ -51,6 +52,8 @@ export interface BotOptions {
   memory?: boolean;
   /** Two-lane layout: offer side-specific peeks and side cues. */
   layout?: 'duel' | 'split';
+  /** Corrupt the side cue (see cueNoise.ts). Off by default. */
+  cueNoise?: CueNoise;
 }
 
 /** Rounds of history shown to the brain. */
@@ -94,7 +97,7 @@ function syncKey(patch: Partial<EnemyContext>): string {
   });
 }
 
-export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log, onDecision, onMove, memory, layout = 'duel' }: BotOptions) {
+export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log, onDecision, onMove, memory, layout = 'duel', cueNoise }: BotOptions) {
   const split = layout === 'split';
   let actor: Actor<ReturnType<typeof createEnemyMachine>> | null = null;
   let state: MachineState = 'holding';
@@ -114,6 +117,9 @@ export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log,
   let roundStartedAt = Date.now();
   let firstPeekS: number | null = null;
   let diedWhile: MachineState | null = null;
+  /** Counts `round_start` packets, like the run log, so both roll the same round. */
+  let roundNo = 0;
+  let cue: CueCondition = 'true';
 
   const send = (fire: boolean) => {
     const intent: Intent = { t: 'intent', bot: id, state, fire, seq: ++seq };
@@ -181,7 +187,7 @@ export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log,
       playerDistance: obs.dist,
       playerHp: obs.enemyHp,
       heardFootsteps: obs.footsteps,
-      footstepsFrom: obs.footstepsFrom ?? null,
+      footstepsFrom: applyCue(obs.footstepsFrom, cue),
       sinceSeen: obs.sinceSeen,
       lastSeenSide: obs.lastSeenSide ?? null,
       onTarget: obs.onTarget ?? 0,
@@ -215,7 +221,10 @@ export function createBot({ id, client, emit, aimSeconds = AIM_MIN_SECONDS, log,
   }
 
   function handle(packet: Inbound) {
-    if (packet.t === 'round_start') return start();
+    if (packet.t === 'round_start') {
+      cue = cueCondition(cueNoise, ++roundNo);
+      return start();
+    }
     if (!actor) start();
     if (packet.t === 'obs') return applyObs(packet);
     if (packet.t === 'bot_died') diedWhile = state;

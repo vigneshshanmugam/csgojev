@@ -13,7 +13,7 @@ import { ruleChoice, type Situation } from './brains';
 
 type Line =
   | { t: 'meta'; brain: string; [k: string]: unknown }
-  | { t: 'round_start'; round: number; at: number; route?: 'left' | 'right' | null }
+  | { t: 'round_start'; round: number; at: number; route?: 'left' | 'right' | null; cue?: 'true' | 'hidden' | 'flipped' }
   | { t: 'round_end'; round: number; result: 'win' | 'loss' | 'draw'; at: number }
   | { t: 'death'; round: number; who: 'bot' | 'enemy' }
   | { t: 'move'; round: number; at: number; from: string; to: string; fired: boolean }
@@ -45,6 +45,8 @@ export interface BrainRun {
     result: 'win' | 'loss' | 'draw';
     seconds: number;
     route?: 'left' | 'right' | null;
+    /** How the side cue was corrupted this round, when it was. */
+    cue?: 'true' | 'hidden' | 'flipped';
   }>;
   decisions: Decision[];
   moves: Move[];
@@ -143,11 +145,13 @@ export function readRun(path: string, offset = 0): BrainRun {
   const meta = (lines.find((l) => l.t === 'meta') ?? { brain: basename(path, '.jsonl') }) as Record<string, unknown>;
   const starts = new Map<number, number>();
   const routes = new Map<number, 'left' | 'right' | null>();
+  const cues = new Map<number, 'true' | 'hidden' | 'flipped'>();
   const results = new Map<number, { result: 'win' | 'loss' | 'draw'; seconds: number }>();
   for (const l of lines) {
     if (l.t === 'round_start') {
       starts.set(l.round, l.at);
       routes.set(l.round, l.route ?? null);
+      if (l.cue) cues.set(l.round, l.cue);
     }
     if (l.t === 'round_end') results.set(l.round, { result: l.result, seconds: (l.at - (starts.get(l.round) ?? l.at)) / 1000 });
   }
@@ -163,7 +167,7 @@ export function readRun(path: string, offset = 0): BrainRun {
   return {
     brain: String(meta.brain),
     meta,
-    rounds: [...results].map(([round, r], i) => ({ round: round + offset, slot, index: i + 1, firstPeekS: firstPeek(round), route: routes.get(round) ?? null, ...r })),
+    rounds: [...results].map(([round, r], i) => ({ round: round + offset, slot, index: i + 1, firstPeekS: firstPeek(round), route: routes.get(round) ?? null, cue: cues.get(round), ...r })),
     decisions,
     moves: lines.filter((l): l is Move => l.t === 'move' && results.has(l.round)).map((m) => ({ ...m, round: m.round + offset })),
   };
@@ -277,6 +281,27 @@ export function report(runs: BrainRun[]): string {
       ),
       '',
     );
+
+    if (runs.some((r) => r.rounds.some((x) => x.cue))) {
+      out.push('## By cue condition', '');
+      out.push('Wins-losses-draws by how the side cue was corrupted that round (true, hidden, or pointing at the wrong lane).', '');
+      out.push(
+        table(
+          ['brain', 'true', 'hidden', 'flipped'],
+          runs.map((r) => [
+            r.brain,
+            ...(['true', 'hidden', 'flipped'] as const).map((cue) => {
+              const here = r.rounds.filter((x) => x.cue === cue);
+              if (!here.length) return '-';
+              const w = here.filter((x) => x.result === 'win').length;
+              const l = here.filter((x) => x.result === 'loss').length;
+              return `${w}-${l}-${here.length - w - l}`;
+            }),
+          ]),
+        ),
+        '',
+      );
+    }
 
     out.push('## Split opening', '');
     out.push('Wrong-side first peeks count rounds where the first delivered peek chose the lane opposite the zBot route.', '');
