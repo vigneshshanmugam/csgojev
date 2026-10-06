@@ -36,6 +36,8 @@ Two design rules came out of early mistakes:
 | Lever check | AWP vs M4A1, Expert, held zBot, sequential | 400 (cap) | rush 54%, rule 48%, z 1.63 |
 | Split lever | AWP vs M4A1, Expert, `jev_split`, routed zBot | 100 | cue 71%, sweep 55% |
 | Split Jev | AWP vs M4A1, Expert, `jev_split`, routed zBot | 198 (cap) | jev 77%, cue 66%, sweep 54% |
+| Split retreat check | same, no Jev | 200 | cue 66%, cuehold 71% |
+| Split noisy cue | same, cue hidden 25% / flipped 25% | 99 | cue 57%, cuehold 54%, cueswitch (3s timer) 52% |
 
 Win rates count draws as non-wins. Run folders are under `cs16/runs/`, named by date.
 
@@ -55,7 +57,11 @@ The held run was the test for a mixed-opponent design. If a held zBot wanted a d
 
 **The split-lane duel has a lever.** `jev_split` adds left and right peek lanes. A scripted zBot route makes footsteps identify the side before contact, then releases the zBot back to stock hunting after the route. In the no-API lever check, `cue` beat `sweep` 71/100 to 55/100. `cue` had 0/100 wrong-side first peeks; `sweep` had 48/100. That made the Jev run worth the API spend.
 
-**Jev cleared the split-lane check.** At the 198-round cap, `jev` went 153-42-3, `cue` 131-67-0 and `sweep` 107-67-24. The primary comparison was non-inferiority to `cue` within 10 points; Jev finished 11.1 points ahead, and the approximate one-sided lower bound for `jev - cue` was about +3.7 points, above the -10 point margin. Against `sweep`, Jev was +23.2 points (p=0.0000016), which settles the secondary comparison. Jev had 0/194 wrong-side delivered first peeks; `cue` had 0/198 and `sweep` had 89/198.
+**Jev cleared the split-lane check.** At the 198-round cap, `jev` went 153-42-3, `cue` 131-67-0 and `sweep` 107-67-24. The primary comparison was non-inferiority to `cue` within 10 points; Jev finished 11.1 points ahead (see the retreat note below for what that gap is made of), and the approximate one-sided lower bound for `jev - cue` was about +3.7 points, above the -10 point margin. Against `sweep`, Jev was +23.2 points (p=0.0000016), which settles the secondary comparison. Jev had 0/194 wrong-side delivered first peeks; `cue` had 0/198 and `sweep` had 89/198.
+
+**Part of Jev's lead over `cue` is the retreat rule.** `cue` inherits the scoped retreat from `rule` (fall back below 50 HP with the attacker in sight). Rounds where it fell back were won 0% of the time, and it fell back in 131 decisions against Jev's 15. `cuehold` is `cue` with only that rule removed. Over 200 rounds each, `cue` won 66% and `cuehold` 71% (+5, p about 0.28), against Jev's 77%. So about half of Jev's +11 over `cue` is the retreat, and the other 6 points (p about 0.15) cannot be separated from noise at this size. Detecting 6 points would take about 600 rounds per brain.
+
+**A noisy cue hurts the scripts, with little room to recover so far.** In a check without API calls, the side label was hidden in 25% of rounds and flipped in 25%. `cue` and `cuehold` fell to 50% in the first run and 57% and 54% in the second, which used a different roll mix; on flipped rounds they won 15 to 27%. `cueswitch`, a script that drops a lane that shows nothing for 3 seconds and tries the other, won 46% of flipped rounds but fell 15 points on true ones, ending at 52%. Logs show why: in about 1 true-cue round in 5 the zBot took more than 3 seconds to appear, and the switch gave up on the correct lane first. The timer was borrowed from `sweep`, where it made sense. At 25% flipped, even a perfect cross-checker gains about 10 points, which 99 rounds per arm cannot see.
 
 **The fall-back decision is too rare to matter.** In the first 100 `rush` rounds, falling back while the scope settled preceded losses more often for `rule` (13%) than for `rush` (0%). That was confounded, because both scripts fall back only below 50 HP. The confirmatory `rushhold` run was stopped before looking at any win rate: only 5 of 100 rounds reached that branch, so it can move the overall win rate by about 5 points at most, below what 400 rounds per brain can detect.
 
@@ -81,7 +87,7 @@ These were caught in the logs and fixed before the next run. Runs record the plu
 
 The split result is the first positive result, but it is still narrow. The next ways to strengthen or falsify it:
 
-- **A less built-in cue.** The current route exposes the side through `footstepsFrom`, so the task is close to "map the cue to the lane." A stronger duel would make the cue partial or delayed, with repositioning after first contact.
+- **A less built-in cue.** The current route exposes the side through `footstepsFrom`, so the task is close to "map the cue to the lane." The noisy-cue checks above are the first step: a cross-checking script with a longer timer, on a noisier cue, decides whether there is anything past lane-matching for Jev to win.
 - **A rifler brain for Jev.** Jev would play the attacker's seat instead of the AWPer's.
 - **Steering the stock zBot** (`cs16/STEERING.md`). This now looks less promising than the split duel because the choice surface is smaller.
 

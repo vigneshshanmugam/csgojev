@@ -59,7 +59,7 @@ Decision latency is a median of about 100ms (p90 about 160 to 200ms). With place
 
 ## Does Jev help?
 
-On the original one-lane duel, not detectably: Jev reaches the level of a tuned script without any hand-written thresholds, but that duel is too coarse to tell it apart from one. On the richer split-lane duel, Jev matched a hand-written cue reader on a built-in cue and beat a no-cue sweep script. The full write-up is in [`cs16/FINDINGS.md`](cs16/FINDINGS.md).
+On the original one-lane duel, not detectably: Jev reaches the level of a tuned script without any hand-written thresholds, but that duel is too coarse to tell it apart from one. On the richer split-lane duel, Jev matched a hand-written cue reader on a built-in cue and beat a no-cue sweep script. Part of its lead over that reader comes from the reader's own retreat rule, not from reading better. The full write-up is in [`cs16/FINDINGS.md`](cs16/FINDINGS.md).
 
 To isolate Jev, `cs16/compare.sh` swaps only the decision-maker (`cs16/sidecar/src/brains.ts`) while the body, machine, map and zBot stay fixed:
 
@@ -78,6 +78,8 @@ To isolate Jev, `cs16/compare.sh` swaps only the decision-maker (`cs16/sidecar/s
 | Lever check, held zBot, 400 rounds each | AWP vs M4A1, Expert, `jev_zhold 1`, four slots | rush 216-81-103, rule 193-104-103 |
 | Split cue check, 100 rounds each | `jev_split`, routed Expert M4A1 zBot | cue 71, sweep 55 |
 | Split Jev check, 198 rounds each | `jev_split`, routed Expert M4A1 zBot | jev 153-42-3, cue 131-67-0, sweep 107-67-24 |
+| Retreat check, 200 rounds each | same, no Jev | cue 132-66-2, cuehold 142-58-0 |
+| Noisy cue, 99 rounds each | same, side cue hidden 25% and flipped 25% | cue 56-18-25, cuehold 53-21-25, cueswitch 51-31-17 |
 
 What the runs show:
 
@@ -88,6 +90,8 @@ What the runs show:
 - Jev opens like `rush`: it peeks from cover every round. Where it departs from the rules it does so at 30 to 45% confidence.
 - Falling back while hurt comes up in about 5% of rounds, so it cannot move the overall win rate by more than about 5 points.
 - `jev_split` does have a lever: `footstepsFrom` reveals which of two lanes the routed zBot is taking. `cue` beat `sweep` 71% to 55%, and Jev cleared the pre-registered non-inferiority check against `cue` while beating `sweep` by 23 points at the cap.
+- Part of Jev's +11 over `cue` is `cue`'s own retreat rule. Removing only that rule (`cuehold`) gives 71%, which is +5 over `cue` and 6 short of Jev (77%). The remaining 6 points are not separable at 200 rounds per brain.
+- Corrupting the cue hurts the scripts that trust it (66% and 71% down to about 55%). A script that cross-checks the cue did not do better, because its 3-second timer gave up on true lanes before the zBot arrived. That check is being redone with a longer timer.
 
 What is not tested:
 
