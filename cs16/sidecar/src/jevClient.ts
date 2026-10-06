@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { mockAnswers, type JevClient } from '@xstate/jev';
-import { cueChoice, cueHoldChoice, cueSwitchClient, fixedSideChoice, randomClient, ruleClient, rushChoice, rushHoldChoice, sweepClient, type BrainName } from './brains';
+import { cueChoice, cueHoldChoice, cueCheckClient, cueSwitchClient, fixedSideChoice, randomClient, ruleClient, rushChoice, rushHoldChoice, sweepClient, type BrainName } from './brains';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -48,6 +48,7 @@ export async function makeClient(brain: BrainName = 'jev'): Promise<ClientHandle
   if (brain === 'cueswitch') return { client: cueSwitchClient(), live: false };
   if (brain === 'cueswitch5') return { client: cueSwitchClient(undefined, 5), live: false };
   if (brain === 'cueswitch7') return { client: cueSwitchClient(undefined, 7), live: false };
+  if (brain === 'cuecheck') return { client: cueCheckClient(), live: false };
   if (brain === 'sweep') return { client: sweepClient(), live: false };
   if (brain === 'random') return { client: randomClient(), live: false };
   const key = brain === 'mock' ? undefined : envKey();

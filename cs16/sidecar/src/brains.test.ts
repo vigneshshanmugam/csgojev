@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { NOOP_ID, type JevRequest } from '@xstate/jev';
-import { RULES, SWEEP_SIDE_SECONDS, createSweepChoice, cueChoice, cueHoldChoice, createCueSwitchChoice, fixedSideChoice, randomClient, ruleChoice, ruleClient, rushChoice, rushHoldChoice, type Situation } from './brains';
+import { RULES, SWEEP_SIDE_SECONDS, createSweepChoice, cueChoice, cueHoldChoice, createCueSwitchChoice, createCueCheckChoice, fixedSideChoice, randomClient, ruleChoice, ruleClient, rushChoice, rushHoldChoice, type Situation } from './brains';
 import { openRunLog } from './runLog';
 import { MEMORY_ROUNDS, createBot, roundSummary } from './bot';
 import type { Inbound } from './protocol';
@@ -126,6 +126,23 @@ describe('split-lane brains', () => {
     expect(choose(dry, ['enemy.fallBack', NOOP_ID])).toBe(NOOP_ID);
     t = 7;
     expect(choose(dry, ['enemy.fallBack', NOOP_ID])).toBe('enemy.fallBack');
+  });
+
+  it('cuecheck marks a lane dry when a peek ends unseen, even by the machine reflex', () => {
+    const choose = createCueCheckChoice(() => 0);
+    expect(choose(at({ footstepsFrom: 'left' }), splitCover)).toBe('enemy.peekLeft');
+    choose(at({ you: 'scoped', side: 'left', footstepsFrom: 'left' }), ['enemy.fallBack', NOOP_ID]);
+    // the reflex put it back in cover; the label still says left
+    expect(choose(at({ footstepsFrom: 'left' }), splitCover)).toBe('enemy.peekRight');
+  });
+
+  it('cuecheck keeps a lane it saw the player on, and trusts a sighting over the label', () => {
+    const choose = createCueCheckChoice(() => 0);
+    choose(at({ footstepsFrom: 'left' }), splitCover);
+    choose(at({ you: 'scoped', side: 'left', playerInSight: true }), ['enemy.fallBack', NOOP_ID]);
+    expect(choose(at({ footstepsFrom: 'left' }), splitCover)).toBe('enemy.peekLeft');
+    const fresh = createCueCheckChoice(() => 0);
+    expect(fresh(at({ footstepsFrom: 'left', playerLastSeenOn: 'right' }), splitCover)).toBe('enemy.peekRight');
   });
 
   it('cueswitch stays on a lane once it sees the player', () => {
