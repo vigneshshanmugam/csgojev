@@ -91,7 +91,7 @@ What the runs show:
 - Falling back while hurt comes up in about 5% of rounds, so it cannot move the overall win rate by more than about 5 points.
 - `jev_split` does have a lever: `footstepsFrom` reveals which of two lanes the routed zBot is taking. `cue` beat `sweep` 71% to 55%, and Jev cleared the pre-registered non-inferiority check against `cue` while beating `sweep` by 23 points at the cap.
 - Part of Jev's +11 over `cue` is `cue`'s own retreat rule. Removing only that rule (`cuehold`) gives 71%, which is +5 over `cue` and 6 short of Jev (77%). The remaining 6 points are not separable at 200 rounds per brain.
-- Corrupting the cue hurts the scripts that trust it (66% and 71% down to about 55%). A script that cross-checks the cue did not do better, because its 3-second timer gave up on true lanes before the zBot arrived. That check is being redone with a longer timer.
+- Corrupting the cue hurts the scripts that trust it (66% and 71% down to about 55%). Scripts that cross-check the cue did not do better either. A timer-based one raced the machine's own 5-second exposure reflex and mostly never fired. A rewritten one (`cuecheck`) marks a lane dry whenever a peek ends unseen and trusts a sighting over the label. It peeks both lanes in 85% of flipped rounds, but ties `cuehold` at 56% overall: the draws it removes turn into even fights, and it loses a few true rounds.
 
 What is not tested:
 
