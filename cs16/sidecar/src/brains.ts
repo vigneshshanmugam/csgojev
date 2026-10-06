@@ -15,7 +15,7 @@
  */
 import { NOOP_ID, type JevAnswer, type JevClient, type JevRequest } from '@xstate/jev';
 
-export const brains = ['jev', 'jevmem', 'rule', 'rush', 'rushhold', 'left', 'right', 'cue', 'sweep', 'random', 'mock'] as const;
+export const brains = ['jev', 'jevmem', 'rule', 'rush', 'rushhold', 'left', 'right', 'cue', 'cuehold', 'sweep', 'random', 'mock'] as const;
 /** Brains that call Jev, and so need a key to mean anything. */
 export const isJev = (brain: string) => brain === 'jev' || brain === 'jevmem';
 export type BrainName = (typeof brains)[number];
@@ -126,6 +126,16 @@ export function cueChoice(s: Situation, offered: readonly string[], rand: () => 
   if (s.you === 'holding' && side && has(peekFor(side))) return peekFor(side);
   if (s.you.startsWith('peeking') && has(STRAFE)) return STRAFE;
   return ruleChoice(s, offered);
+}
+
+/**
+ * Cue with the scoped retreat removed: the only difference from `cue`, so a gap
+ * between the two is that rule's doing. Tests whether Jev's edge over `cue`
+ * is lane choice (equal here) or simply never falling back.
+ */
+export function cueHoldChoice(s: Situation, offered: readonly string[], rand: () => number = Math.random): string {
+  const choice = cueChoice(s, offered, rand);
+  return s.you === 'scoped' && choice === FALL_BACK && offered.includes(NOOP_ID) ? NOOP_ID : choice;
 }
 
 export function createSweepChoice(now: () => number = () => Date.now() / 1000): (s: Situation, offered: readonly string[]) => string {

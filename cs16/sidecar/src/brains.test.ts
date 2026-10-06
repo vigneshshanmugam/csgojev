@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { NOOP_ID, type JevRequest } from '@xstate/jev';
-import { RULES, SWEEP_SIDE_SECONDS, createSweepChoice, cueChoice, fixedSideChoice, randomClient, ruleChoice, ruleClient, rushChoice, rushHoldChoice, type Situation } from './brains';
+import { RULES, SWEEP_SIDE_SECONDS, createSweepChoice, cueChoice, cueHoldChoice, fixedSideChoice, randomClient, ruleChoice, ruleClient, rushChoice, rushHoldChoice, type Situation } from './brains';
 import { openRunLog } from './runLog';
 import { MEMORY_ROUNDS, createBot, roundSummary } from './bot';
 import type { Inbound } from './protocol';
@@ -95,6 +95,14 @@ describe('split-lane brains', () => {
     expect(cueChoice(base, splitCover)).toBe(NOOP_ID);
     expect(cueChoice(at({ footstepsFrom: 'left' }), splitCover)).toBe('enemy.peekLeft');
     expect(cueChoice(at({ playerLastSeenOn: 'right' }), splitCover)).toBe('enemy.peekRight');
+  });
+
+  it('cuehold is cue without the scoped retreat', () => {
+    const hurt = at({ you: 'scoped', playerInSight: true, yourHp: 30, aim: 'still settling, no shot yet' });
+    const offered = ['enemy.fallBack', NOOP_ID];
+    expect(cueChoice(hurt, offered)).toBe('enemy.fallBack');
+    expect(cueHoldChoice(hurt, offered)).toBe(NOOP_ID);
+    expect(cueHoldChoice(at({ footstepsFrom: 'left' }), splitCover)).toBe('enemy.peekLeft');
   });
 
   it('cue guesses on quiet or low clock only when no side cue exists', () => {
