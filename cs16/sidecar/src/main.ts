@@ -12,6 +12,7 @@
  * a JSON object copied into the log's first line (body settings, opponent).
  */
 import { cueNoiseFromEnv } from './cueNoise';
+import { openObsTrace } from './obsTrace';
 import { makeClient } from './jevClient';
 import { brains, isJev, type BrainName } from './brains';
 import { openRunLog } from './runLog';
@@ -39,12 +40,17 @@ const runLog = process.env.RUN_LOG
   ? openRunLog(process.env.RUN_LOG, { brain, live: handle.live, slot, ...JSON.parse(process.env.RUN_META ?? '{}'), ...(cueNoise ? { cueNoise } : {}) }, cueNoise)
   : undefined;
 
+const trace = process.env.OBS_TRACE ? openObsTrace(process.env.OBS_TRACE) : undefined;
+
 const sidecar = await startSidecar({
   client: runLog ? runLog.client(handle.client) : handle.client,
   inPort,
   outPort,
   log: (message) => console.log(message),
-  onPacket: runLog?.packet,
+  onPacket: (packet) => {
+    runLog?.packet(packet);
+    trace?.(packet);
+  },
   onDecision: runLog?.decision,
   onMove: runLog?.move,
   memory: brain === 'jevmem',

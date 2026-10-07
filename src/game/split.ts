@@ -21,11 +21,11 @@ export const SPLIT_LANE_M = SPLIT_SPAWN.z - SPLIT_HOLD.z;
 export const SPLIT_HALF_WIDTH = 6;
 
 export type SplitRoute = 'left' | 'right';
-export const SPLIT_LEFT_0 = { x: -3.2, z: 2.5 };
-export const SPLIT_LEFT_1 = { x: -3.2, z: -13 };
+export const SPLIT_LEFT_0 = { x: -2.8, z: 2.5 };
+export const SPLIT_LEFT_1 = { x: -2.8, z: -13 };
 export const SPLIT_LEFT_2 = { x: -2.4, z: -17 };
-export const SPLIT_RIGHT_0 = { x: 3.2, z: 2.5 };
-export const SPLIT_RIGHT_1 = { x: 3.2, z: -13 };
+export const SPLIT_RIGHT_0 = { x: 2.8, z: 2.5 };
+export const SPLIT_RIGHT_1 = { x: 2.8, z: -13 };
 export const SPLIT_RIGHT_2 = { x: 2.4, z: -17 };
 export const SPLIT_ROUTES: Record<SplitRoute, Array<{ x: number; z: number }>> = {
   left: [SPLIT_LEFT_0, SPLIT_LEFT_1, SPLIT_LEFT_2],
