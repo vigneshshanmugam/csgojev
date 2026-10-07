@@ -5,6 +5,7 @@
 #   cs16/run.sh say "cmd"    # send one server-console command
 #   SLOT=1 cs16/run.sh       # a second, isolated server (see slot.sh)
 #   ADDONS=/dir cs16/run.sh  # mount another addons dir (a plugin build under test)
+#   SKIP_NAV="jev_split.nav" cs16/run.sh   # leave these cached navmeshes out (to let zBot learn one)
 #
 # The map is docker-cp'd, never bind-mounted (README gotcha 8). The console is a FIFO
 # fed to `docker attach` (README gotcha 11); it must stay open or the engine sees EOF.
@@ -65,6 +66,7 @@ done
 # Cached navmesh (learned once; README gotcha 4). Must be world-readable, in cstrike/maps.
 for nav in "$HERE"/gamedata/maps/jev_*.nav; do
   [ -f "$nav" ] || continue
+  case " ${SKIP_NAV:-} " in *" $(basename "$nav") "*) continue ;; esac
   docker cp "$nav" "$NAME":/xashds/cstrike/maps/"$(basename "$nav")"
   docker cp "$nav" "$NAME":/xashds/czero/maps/"$(basename "$nav")"
   docker exec -u 0 "$NAME" sh -c "chown 999:999 /xashds/cstrike/maps/$(basename "$nav"); chmod 644 /xashds/cstrike/maps/$(basename "$nav")"
