@@ -142,6 +142,8 @@ export function sequentialLook(z: number, t: number): 'efficacy' | 'futility' | 
 /** `offset` keeps round numbers from different files apart once merged. */
 export function readRun(path: string, offset = 0): BrainRun {
   const lines = readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as Line);
+  // A second meta line means two runs appended to one file (a reused RUN_DIR): their round numbers collide and the later run silently overwrites the earlier one.
+  if (lines.filter((l) => l.t === 'meta').length > 1) throw new Error(`${path} holds more than one run (several meta lines); give each run its own RUN_DIR`);
   const meta = (lines.find((l) => l.t === 'meta') ?? { brain: basename(path, '.jsonl') }) as Record<string, unknown>;
   const starts = new Map<number, number>();
   const routes = new Map<number, 'left' | 'right' | null>();

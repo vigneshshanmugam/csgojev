@@ -124,3 +124,12 @@ describe('report', () => {
     expect(md).toContain('| jev | 1-0 | 0-1 |');
   });
 });
+
+describe('run files', () => {
+  it('refuses a file that holds two runs', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'runlog-')), 'x.jsonl');
+    const meta = JSON.stringify({ t: 'meta', brain: 'cue' });
+    writeFileSync(file, `${meta}\n${meta}\n`);
+    expect(() => readRun(file)).toThrow(/more than one run/);
+  });
+});
