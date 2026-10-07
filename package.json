@@ -2,6 +2,7 @@
   "name": "csgojev",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@12.4.1",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

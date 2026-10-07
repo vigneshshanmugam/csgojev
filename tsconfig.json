@@ -13,5 +13,5 @@
     "verbatimModuleSyntax": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["src", "scripts", "server", "vite.config.ts", "packages/*/src", "cs16/sidecar/src"]
+  "include": ["src", "scripts", "server", "api", "vite.config.ts", "packages/*/src", "cs16/sidecar/src"]
 }
