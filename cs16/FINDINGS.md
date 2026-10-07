@@ -6,6 +6,10 @@ On the original one-lane duel, Jev plays at the level of a tuned script, but we 
 
 The richer split-lane duel changed that. `jev_split` gives the bot two peek lanes and a route cue through `footstepsFrom`. At the pre-registered cap there, Jev was non-inferior to the hand-written cue reader and beat a no-cue sweep script: `jev` 153/198, `cue` 131/198, `sweep` 107/198. This shows Jev can follow a built-in cue in a designed duel well enough to reach cue-reader-level play without the cue rule being hand-written.
 
+About half of Jev's lead over `cue` turned out to be `cue`'s own retreat rule. With that rule removed, `cuehold` won 71%, and the remaining 6 points to Jev are not separable at 200 rounds per brain. Corrupting the cue hurt the scripts, but a script that cross-checks the label tied `cuehold`, so the noisy cue has nothing left for Jev to win and no Jev run was made on it.
+
+The claim this supports: Jev matches a hand-written cue reader on a clean cue. It does not support Jev beating a tuned script on either map.
+
 ## What we measured
 
 The question was whether Jev's decisions, not the body around them, win rounds. To isolate that, `cs16/compare.sh` swaps only the decision-maker and keeps everything else fixed: the same map (`jev_duel`), the same bot body (`cs16/body.env`: AWP, 220°/s turn, scoped, no pre-aim), the same XState machine, and the same zBot opponent.
@@ -38,6 +42,8 @@ Two design rules came out of early mistakes:
 | Split Jev | AWP vs M4A1, Expert, `jev_split`, routed zBot | 198 (cap) | jev 77%, cue 66%, sweep 54% |
 | Split retreat check | same, no Jev | 200 | cue 66%, cuehold 71% |
 | Split noisy cue | same, cue hidden 25% / flipped 25% | 99 | cue 57%, cuehold 54%, cueswitch (3s timer) 52% |
+| Split noisy cue, timers | same, cue hidden 10% / flipped 40% | 99 | cuehold 53%, cueswitch5 63%, cueswitch7 52% |
+| Split noisy cue, no timer | same, cue hidden 10% / flipped 40% | 100 | cuehold 56%, cuecheck 56% |
 
 Win rates count draws as non-wins. Run folders are under `cs16/runs/`, named by date.
 
@@ -61,7 +67,7 @@ The held run was the test for a mixed-opponent design. If a held zBot wanted a d
 
 **Part of Jev's lead over `cue` is the retreat rule.** `cue` inherits the scoped retreat from `rule` (fall back below 50 HP with the attacker in sight). Rounds where it fell back were won 0% of the time, and it fell back in 131 decisions against Jev's 15. `cuehold` is `cue` with only that rule removed. Over 200 rounds each, `cue` won 66% and `cuehold` 71% (+5, p about 0.28), against Jev's 77%. So about half of Jev's +11 over `cue` is the retreat, and the other 6 points (p about 0.15) cannot be separated from noise at this size. Detecting 6 points would take about 600 rounds per brain.
 
-**A noisy cue hurts the scripts, with little room to recover so far.** In a check without API calls, the side label was hidden in 25% of rounds and flipped in 25%. `cue` and `cuehold` fell to 50% in the first run and 57% and 54% in the second, which used a different roll mix; on flipped rounds they won 15 to 27%. `cueswitch`, a script that drops a lane that shows nothing for a fixed time, did not help: its 3-second timer gave up on true lanes before the zBot arrived, and its 5 and 7-second timers raced the machine's own 5-second exposure reflex (`EXPOSED_MS`), so the 7-second one never fired and played exactly like `cuehold`. The one apparent gain (`cueswitch5`, +10 points, p about 0.15) was that race. `cuecheck` removes the timer: it marks a lane dry whenever a peek ends in cover without a sighting, reflex included, and trusts a sighting over the label. It peeks both lanes in 34 of 40 flipped rounds and still ties `cuehold` at 56% over 100 rounds each. On flipped rounds it turns 15 draws into fights, which are about even (17 wins, 13 losses), and it loses a few true and hidden rounds. One caveat on the whole noisy-cue family: after its route the released zBot stops about 16m out and waits, often out of sight of both peek spots. In the `cuecheck` run, correct-lane peeks that started 8s or more into the round found it in only 43 of 111 tries, against 147 of 188 for earlier ones. A wrong first guess therefore costs a draw more often than a death, and many of those draws cannot be won by picking the other lane. That caps what any cross-check, Jev included, could recover on this map. The noisy cue offers no lever past lane-matching, so no Jev run was made on it.
+**A noisy cue hurts the scripts, and there is nothing to recover.** In a check without API calls, the side label was hidden in 25% of rounds and flipped in 25%. `cue` and `cuehold` fell to 50% in the first run and 57% and 54% in the second, which used a different roll mix; on flipped rounds they won 15 to 27%. `cueswitch`, a script that drops a lane that shows nothing for a fixed time, did not help: its 3-second timer gave up on true lanes before the zBot arrived, and its 5 and 7-second timers raced the machine's own 5-second exposure reflex (`EXPOSED_MS`), so the 7-second one never fired and played exactly like `cuehold`. The one apparent gain (`cueswitch5`, +10 points, p about 0.15) was that race. `cuecheck` removes the timer: it marks a lane dry whenever a peek ends in cover without a sighting, reflex included, and trusts a sighting over the label. It peeks both lanes in 34 of 40 flipped rounds and still ties `cuehold` at 56% over 100 rounds each. On flipped rounds it turns 15 draws into fights, which are about even (17 wins, 13 losses), and it loses a few true and hidden rounds. One caveat on the whole noisy-cue family: after its route the released zBot stops about 16m out and waits, often out of sight of both peek spots. In the `cuecheck` run, correct-lane peeks that started 8s or more into the round found it in only 43 of 111 tries, against 147 of 188 for earlier ones. A wrong first guess therefore costs a draw more often than a death, and many of those draws cannot be won by picking the other lane. That caps what any cross-check, Jev included, could recover on this map. The noisy cue offers no lever past lane-matching, so no Jev run was made on it.
 
 **The fall-back decision is too rare to matter.** In the first 100 `rush` rounds, falling back while the scope settled preceded losses more often for `rule` (13%) than for `rush` (0%). That was confounded, because both scripts fall back only below 50 HP. The confirmatory `rushhold` run was stopped before looking at any win rate: only 5 of 100 rounds reached that branch, so it can move the overall win rate by about 5 points at most, below what 400 rounds per brain can detect.
 
@@ -69,7 +75,7 @@ The held run was the test for a mixed-opponent design. If a held zBot wanted a d
 
 ## What this does not show
 
-- **It does not show that Jev is no better than a script.** A null at 400 rounds per brain rules out gaps larger than about 10 points between the scripts, not smaller ones, and Jev itself was only run at 20 to 21 rounds per brain.
+- **It does not show that Jev is no better than a script.** A null at 400 rounds per brain rules out gaps larger than about 10 points between the scripts, not smaller ones, and on `jev_duel` Jev itself was only run at 20 to 21 rounds per brain.
 - **The split result is a designed cue-label test.** `jev_split` uses `jev_zroute` to drive the zBot down a lane before releasing it, and the state includes `footstepsFrom: left|right`. That answers whether Jev can map an explicit cue label to the right lane in a game we designed, not whether it reads ambiguous audio or improves the shipped zBot in an ordinary match.
 - **It does not cover other maps or opponents.** The original null runs used `jev_duel`, one lane with one peek spot, against zBot on Expert or Hard. A held zBot is also not how the stock bot plays a real match.
 - **It does not test adaptation across rounds.** Jev sees each situation fresh. A `jevmem` brain that sees a summary of the last 5 rounds exists, but we kept it out of the comparisons until a lever existed, so it is untested.
@@ -85,9 +91,9 @@ These were caught in the logs and fixed before the next run. Runs record the plu
 
 ## What would change the answer
 
-The split result is the first positive result, but it is still narrow. The next ways to strengthen or falsify it:
+The split result is the first positive result, but it is narrow, and the noisy-cue checks found no further lever on this map. The next ways to strengthen or falsify it:
 
-- **A less built-in cue.** The current route exposes the side through `footstepsFrom`, so the task is close to "map the cue to the lane." The noisy-cue checks above are the first step: a cross-checking script with a longer timer, on a noisier cue, decides whether there is anything past lane-matching for Jev to win.
+- **A zBot that keeps coming.** After its route the released zBot parks, often out of sight, so a wrong lane guess costs a draw. If it kept pushing, a wrong or late read would cost a death, and the timing of a lane switch would become a choice no single fixed rule gets right. That is plugin work in `jev_zroute`. The same gate applies first: a script without API calls has to beat `cuehold` before Jev runs.
 - **A rifler brain for Jev.** Jev would play the attacker's seat instead of the AWPer's.
 - **Steering the stock zBot** (`cs16/STEERING.md`). This now looks less promising than the split duel because the choice surface is smaller.
 
