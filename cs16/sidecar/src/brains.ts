@@ -15,7 +15,7 @@
  */
 import { NOOP_ID, type JevAnswer, type JevClient, type JevRequest } from '@xstate/jev';
 
-export const brains = ['jev', 'jevmem', 'rule', 'rush', 'rushhold', 'left', 'right', 'cue', 'cuehold', 'cueswitch', 'cueswitch5', 'cueswitch7', 'cuecheck', 'sweep', 'random', 'mock'] as const;
+export const brains = ['jev', 'jevmem', 'rule', 'rush', 'rushhold', 'left', 'right', 'cue', 'cuehold', 'cuewait', 'cueswitch', 'cueswitch5', 'cueswitch7', 'cuecheck', 'sweep', 'random', 'mock'] as const;
 /** Brains that call Jev, and so need a key to mean anything. */
 export const isJev = (brain: string) => brain === 'jev' || brain === 'jevmem';
 export type BrainName = (typeof brains)[number];
@@ -136,6 +136,16 @@ export function cueChoice(s: Situation, offered: readonly string[], rand: () => 
 export function cueHoldChoice(s: Situation, offered: readonly string[], rand: () => number = Math.random): string {
   const choice = cueChoice(s, offered, rand);
   return s.you === 'scoped' && choice === FALL_BACK && offered.includes(NOOP_ID) ? NOOP_ID : choice;
+}
+
+/**
+ * `cuehold` that finishes the peek while the attacker is out of sight: it
+ * waits instead of counter-strafing part way out (as `sweep` does). The only
+ * difference from `cuehold`, so a gap between them is that stop's doing.
+ */
+export function cueWaitChoice(s: Situation, offered: readonly string[], rand: () => number = Math.random): string {
+  if (s.you.startsWith('peeking') && !s.playerInSight && offered.includes(NOOP_ID)) return NOOP_ID;
+  return cueHoldChoice(s, offered, rand);
 }
 
 export function createSweepChoice(now: () => number = () => Date.now() / 1000): (s: Situation, offered: readonly string[]) => string {

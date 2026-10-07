@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { NOOP_ID, type JevRequest } from '@xstate/jev';
-import { RULES, SWEEP_SIDE_SECONDS, createSweepChoice, cueChoice, cueHoldChoice, createCueSwitchChoice, createCueCheckChoice, fixedSideChoice, randomClient, ruleChoice, ruleClient, rushChoice, rushHoldChoice, type Situation } from './brains';
+import { RULES, SWEEP_SIDE_SECONDS, createSweepChoice, cueChoice, cueHoldChoice, cueWaitChoice, createCueSwitchChoice, createCueCheckChoice, fixedSideChoice, randomClient, ruleChoice, ruleClient, rushChoice, rushHoldChoice, type Situation } from './brains';
 import { openRunLog } from './runLog';
 import { MEMORY_ROUNDS, createBot, roundSummary } from './bot';
 import type { Inbound } from './protocol';
@@ -103,6 +103,16 @@ describe('split-lane brains', () => {
     expect(cueChoice(hurt, offered)).toBe('enemy.fallBack');
     expect(cueHoldChoice(hurt, offered)).toBe(NOOP_ID);
     expect(cueHoldChoice(at({ footstepsFrom: 'left' }), splitCover)).toBe('enemy.peekLeft');
+  });
+
+  it('cuewait finishes the peek unseen, strafes once the attacker shows', () => {
+    const unseen = at({ you: 'peekingLeft', playerInSight: false });
+    const seen = at({ you: 'peekingLeft', playerInSight: true });
+    const offered = ['enemy.counterStrafe', NOOP_ID];
+    expect(cueHoldChoice(unseen, offered)).toBe('enemy.counterStrafe');
+    expect(cueWaitChoice(unseen, offered)).toBe(NOOP_ID);
+    expect(cueWaitChoice(seen, offered)).toBe('enemy.counterStrafe');
+    expect(cueWaitChoice(at({ footstepsFrom: 'left' }), splitCover)).toBe('enemy.peekLeft');
   });
 
   it('cueswitch peeks the cue, drops a dry lane after a while, then tries the other', () => {
