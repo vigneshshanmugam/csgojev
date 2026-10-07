@@ -8,13 +8,13 @@ import { TypeSafeClient } from '@typesafe-ai/sdk';
  * over a limit or failing the limiter answers with the mock, never the key.
  *
  * Env: TYPESAFE_API_KEY (unset => mock only), JEV_IP_PER_MIN (default 120),
- * JEV_DAILY_CAP (default 5000), UPSTASH_REDIS_REST_URL/_TOKEN (shared counters;
+ * JEV_DAILY_CAP (default 2000), UPSTASH_REDIS_REST_URL/_TOKEN (shared counters;
  * without them counters are per-instance and best-effort).
  */
 const MAX_BODY_BYTES = 32_000;
 const MAX_QUESTIONS = 64;
 const ipPerMin = Number(process.env.JEV_IP_PER_MIN ?? 120);
-const dailyCap = Number(process.env.JEV_DAILY_CAP ?? 5000);
+const dailyCap = Number(process.env.JEV_DAILY_CAP ?? 2000);
 const key = process.env.TYPESAFE_API_KEY;
 
 let client: TypeSafeClient | null = null;
