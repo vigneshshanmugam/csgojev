@@ -97,4 +97,6 @@ The split result is the first positive result, but it is narrow, and the noisy-c
 - **A rifler brain for Jev.** Jev would play the attacker's seat instead of the AWPer's.
 - **Steering the stock zBot** (`cs16/STEERING.md`). This now looks less promising than the split duel because the choice surface is smaller.
 
+NOTE: every `jev_split` run so far used a placeholder navmesh. `cs16/gamedata/maps/jev_split.nav` is byte-identical to `jev_duel.nav` (added in `0a4cd15` to stop Condition Zero from auto-generating a mesh and restarting the server), so the released zBot has been pathfinding on the one-lane map's mesh. That very likely explains why it parks about 16m out after its route. The comparisons between brains are still fair, because every brain faced the same opponent, but the absolute win rates, the draws on flipped rounds and the noisy-cue null all come from an opponent that does not hunt. They need rerunning on a real mesh before they are read as results about the duel.
+
 NOTE: the spawn fix changes where the zBot starts in every run, held or pushing, so results from before and after `815437a` are not directly comparable.

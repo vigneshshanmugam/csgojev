@@ -211,6 +211,8 @@ These were caught in the logs and fixed before the next run. Several of them wou
 - **Stalled blocks.** Two blocks in one noisy-cue run stopped with the machine stuck. They were rerun, and the partial blocks were left out.
 - **A wrong explanation.** The 5-second gain was first explained as a recovery window that closes when the zBot's route ends. The logs showed the timer racing the exposure reflex instead, and the run's pre-registration carries the correction.
 
+NOTE: every `jev_split` run so far used a placeholder navmesh. `cs16/gamedata/maps/jev_split.nav` is byte-identical to `jev_duel.nav` (added in `0a4cd15` to stop Condition Zero from auto-generating a mesh and restarting the server), so the released zBot has been pathfinding on the one-lane map's mesh. That very likely explains why it parks about 16m out after its route. The comparisons between brains are still fair, because every brain faced the same opponent, but the absolute win rates, the draws on flipped rounds and the noisy-cue null all come from an opponent that does not hunt. They need rerunning on a real mesh before they are read as results about the duel.
+
 NOTE: the route seed is passed to `compare.sh` but not yet written into the run's meta line, so each run's seed is recorded only in its pre-registration.
 
 ### What this proves, and what it doesn't
