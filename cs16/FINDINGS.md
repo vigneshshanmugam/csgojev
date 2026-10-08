@@ -8,7 +8,7 @@ The richer split-lane duel changed that. `jev_split` gives the bot two peek lane
 
 About half of Jev's lead over `cue` turned out to be `cue`'s own retreat rule. With that rule removed, `cuehold` won 71%, and the remaining 6 points to Jev are not separable at 200 rounds per brain. Corrupting the cue hurt the scripts, but a script that cross-checks the label tied `cuehold`, so the noisy cue has nothing left for Jev to win and no Jev run was made on it.
 
-The claim this supports: Jev matches a hand-written cue reader on a clean cue. It does not support Jev beating a tuned script on either map.
+The claim this supports: Jev matches a hand-written cue reader on a clean cue. On the fixed route it scored 75% to `cuehold`'s 67% (p 0.076, unresolved), with one decision, the half-settled shot, accounting for about 2 of the 8.6 points. It does not support Jev beating a tuned script on either map.
 
 ## What we measured
 
@@ -64,6 +64,8 @@ The held run was the test for a mixed-opponent design. If a held zBot wanted a d
 **The split-lane duel has a lever.** `jev_split` adds left and right peek lanes. A scripted zBot route makes footsteps identify the side before contact, then releases the zBot back to stock hunting after the route. In the no-API lever check, `cue` beat `sweep` 71/100 to 55/100. `cue` had 0/100 wrong-side first peeks; `sweep` had 48/100. That made the Jev run worth the API spend.
 
 **Jev cleared the split-lane check.** At the 198-round cap, `jev` went 153-42-3, `cue` 131-67-0 and `sweep` 107-67-24. The primary comparison was non-inferiority to `cue` within 10 points; Jev finished 11.1 points ahead (see the retreat note below for what that gap is made of), and the approximate one-sided lower bound for `jev - cue` was about +3.7 points, above the -10 point margin. Against `sweep`, Jev was +23.2 points (p=0.0000016), which settles the secondary comparison. Jev had 0/194 wrong-side delivered first peeks; `cue` had 0/198 and `sweep` had 89/198.
+
+**On a working zBot Jev matches the best script and differs from it in one decision.** Fixed-route rerun (seeds 81 and 82, 198 rounds per brain, all requests live): `jev` 149-49 (75%), `cuehold` 132-66 (67%), `sweep` 124-74 (63%). Jev is +8.6 over `cuehold` (CI -0.3 to +17.5, p 0.076, ahead in both passes; pre-registered reading: unresolved) and +12.6 over `sweep` (p 0.009). Replaying its decisions through `cuehold`, they differ in 41 of 1,207: 25 half-settled shots where `cuehold` waits, 12 fall-backs where it waits, 4 bolt-cycle waits where it falls back. Jev won all 25 rounds with a half-settled shot against 86% for `cuehold` whenever it reached that aim, worth about 2 points. The other 6 are in rounds with identical choices: noise or timing (Jev peeks 0.27 s in against 0.17 s; its median request latency is 95 ms), untested. Jev counter-strafes unseen in 182 of 182 decisions, like `cuehold`. The earlier +11 and +23 are not results about a working opponent.
 
 **Part of Jev's lead over `cue` is the retreat rule.** `cue` inherits the scoped retreat from `rule` (fall back below 50 HP with the attacker in sight). Rounds where it fell back were won 0% of the time, and it fell back in 131 decisions against Jev's 15. `cuehold` is `cue` with only that rule removed. Over 200 rounds each, `cue` won 66% and `cuehold` 71% (+5, p about 0.28), against Jev's 77%. So about half of Jev's +11 over `cue` is the retreat, and the other 6 points (p about 0.15) cannot be separated from noise at this size. Detecting 6 points would take about 600 rounds per brain.
 
