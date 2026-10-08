@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { browserJevClient, jevLive } from './client';
 import { Game, type Hud } from './game/engine';
-import { applyOutcome, loadScore, saveScore, type Score } from './game/score';
+import { applyOutcome, EMPTY_SCORE, loadScore, MATCH_ROUNDS, matchResult, roundsPlayed, saveScore, type Score } from './game/score';
 
 export function App() {
   const mount = useRef<HTMLDivElement>(null);
@@ -32,17 +32,34 @@ const OVER_TEXT = {
   time: 'Round draw. Time ran out',
 } as const;
 
+const MATCH_TEXT = {
+  human: 'MATCH WON. Humans beat Jev',
+  jev: 'MATCH LOST. Jev wins',
+  tie: 'MATCH TIED',
+} as const;
+
 function Overlay({ game }: { game: Game }) {
   const [, tick] = useReducer((n: number) => n + 1, 0);
   useEffect(() => game.subscribe(tick), [game]);
   const h: Hud = game.hud;
   const [score, setScore] = useState<Score>(loadScore);
   useEffect(() => {
-    if (!h.over) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key.toLowerCase() === 'r' && !e.repeat) resetScore(); };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, []);
+  useEffect(() => {
+    if (!h.over) {
+      // Next round after a finished match starts a fresh match.
+      if (matchResult(score)) { saveScore(EMPTY_SCORE); setScore({ ...EMPTY_SCORE }); }
+      return;
+    }
     const over = h.over;
     setScore((s) => { const n = applyOutcome(s, over); saveScore(n); return n; });
   }, [h.over]);
   const now = performance.now();
+  const result = matchResult(score);
+  const resetScore = () => { saveScore(EMPTY_SCORE); setScore({ ...EMPTY_SCORE }); };
   const clock = `${Math.floor(h.time / 60)}:${String(h.time % 60).padStart(2, '0')}`;
   return (
     <div className="hud">
@@ -56,10 +73,11 @@ function Overlay({ game }: { game: Game }) {
         <span className="human">Human <b>{score.human}</b></span>
         <span className="sep">–</span>
         <span className="jevscore"><b>{score.jev}</b> Jev</span>
-        {(score.draws > 0 || score.streak > 1) && (
-          <small>{score.draws > 0 && `${score.draws} draw${score.draws > 1 ? 's' : ''}`}
-            {score.draws > 0 && score.streak > 1 && ' · '}{score.streak > 1 && `streak ${score.streak}`}</small>
-        )}
+        <small>
+          Round {Math.min(roundsPlayed(score) + 1, MATCH_ROUNDS)}/{MATCH_ROUNDS}
+          {score.draws > 0 && ` · ${score.draws} draw${score.draws > 1 ? 's' : ''}`}
+          {score.streak > 1 && ` · streak ${score.streak}`}
+        </small>
       </div>
       <div className="cs-hp"><small>HEALTH</small><span className="cross">+</span> <b>{h.hp}</b></div>
       <div className="cs-ammo">
@@ -91,15 +109,16 @@ function Overlay({ game }: { game: Game }) {
       {!h.locked && !h.over && (
         <div className="splash" onClick={() => game.lock()}>
           Click to play
-          <br /><small>WASD move · Shift walk · Click fire (AK-47) · R restart</small>
+          <br /><small>WASD move · Shift walk · Click fire (AK-47) · R reset score</small>
+          <br /><small>Best of {MATCH_ROUNDS} · Human {score.human} – {score.jev} Jev</small>
         </div>
       )}
       {h.over && (
         <div className="splash">
           {OVER_TEXT[h.over]}
           <br /><small>Human {score.human} – {score.jev} Jev{score.draws > 0 ? ` · ${score.draws} draw${score.draws > 1 ? 's' : ''}` : ''}</small>
-          <br /><small>Press R to restart</small>
-          <br /><button onClick={() => game.reset()}>Restart</button>
+          <br /><small>Press N for {result ? 'a new match' : 'the next round'} · R to reset score</small>
+          {result && <><br /><b>{MATCH_TEXT[result]}</b></>}
         </div>
       )}
     </div>

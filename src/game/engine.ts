@@ -221,7 +221,7 @@ export class Game {
     const k = e.key.toLowerCase();
     if (e.type === 'keydown') {
       this.keys.add(k);
-      if (k === 'r') this.reset();
+      if (k === 'n' && this.hud.over) this.reset();
     } else this.keys.delete(k);
   };
   private onBlur = () => { this.keys.clear(); };
