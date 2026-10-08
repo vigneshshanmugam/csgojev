@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { browserJevClient, jevLive } from './client';
 import { Game, type Hud } from './game/engine';
+import { applyOutcome, loadScore, saveScore, type Score } from './game/score';
 
 export function App() {
   const mount = useRef<HTMLDivElement>(null);
@@ -35,6 +36,12 @@ function Overlay({ game }: { game: Game }) {
   const [, tick] = useReducer((n: number) => n + 1, 0);
   useEffect(() => game.subscribe(tick), [game]);
   const h: Hud = game.hud;
+  const [score, setScore] = useState<Score>(loadScore);
+  useEffect(() => {
+    if (!h.over) return;
+    const over = h.over;
+    setScore((s) => { const n = applyOutcome(s, over); saveScore(n); return n; });
+  }, [h.over]);
   const now = performance.now();
   const clock = `${Math.floor(h.time / 60)}:${String(h.time % 60).padStart(2, '0')}`;
   return (
@@ -45,8 +52,18 @@ function Overlay({ game }: { game: Game }) {
       {now - h.hit < 150 && <div className="hitmarker">✕</div>}
       {now - h.damaged < 400 && <div className="damage" />}
       <div className="clock">{clock}</div>
-      <div className="cs-hp"><span className="cross">+</span> <b>{h.hp}</b></div>
+      <div className="scoreboard">
+        <span className="human">Human <b>{score.human}</b></span>
+        <span className="sep">–</span>
+        <span className="jevscore"><b>{score.jev}</b> Jev</span>
+        {(score.draws > 0 || score.streak > 1) && (
+          <small>{score.draws > 0 && `${score.draws} draw${score.draws > 1 ? 's' : ''}`}
+            {score.draws > 0 && score.streak > 1 && ' · '}{score.streak > 1 && `streak ${score.streak}`}</small>
+        )}
+      </div>
+      <div className="cs-hp"><small>HEALTH</small><span className="cross">+</span> <b>{h.hp}</b></div>
       <div className="cs-ammo">
+        <small className="lbl">AMMO</small>
         {h.reloading && <small>RELOADING</small>}
         <b>{h.ammo}</b> <span>/ {h.reserve}</span>
       </div>
@@ -80,6 +97,7 @@ function Overlay({ game }: { game: Game }) {
       {h.over && (
         <div className="splash">
           {OVER_TEXT[h.over]}
+          <br /><small>Human {score.human} – {score.jev} Jev{score.draws > 0 ? ` · ${score.draws} draw${score.draws > 1 ? 's' : ''}` : ''}</small>
           <br /><small>Press R to restart</small>
           <br /><button onClick={() => game.reset()}>Restart</button>
         </div>

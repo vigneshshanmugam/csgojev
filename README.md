@@ -64,13 +64,13 @@ This table shows the whole system works. It does not isolate Jev, because the co
 
 ### Short answer
 
-Jev works, and it plays as well as a hand-written script that reads the same cues, without anyone writing that rule for it. On the one map where a cue mattered, it also avoided a mistake the hand-written script made. What we could not show is Jev beating a well-written script: every edge we found in these duels, a one-line rule captured just as well. Against a zBot that walks its lane, Jev scored 75% to the best script's 67% (+8.6 points, p 0.076, unresolved); an audit of its decisions shows it differs from that script in 41 of 1,207 and the one difference that matters, taking the half-settled shot, explains about 2 of the 8.6 points.
+Jev works, and it plays as well as a hand-written script that reads the same cues, without anyone writing that rule for it. On the one map where a cue mattered, it also avoided a mistake the hand-written script made. What we could not show is Jev beating a well-written script: every edge we found in these duels, a one-line rule captured just as well. Against a zBot that walks its lane, Jev scored 75% to the best script's 67% (+8.6 points, p 0.076, unresolved); its choices were the same as that script's in all but 41 of 1,207 decisions, and the one difference that clearly mattered, taking the half-settled shot, is worth roughly 2 points (a rough estimate, see below).
 
 | Claim | Status |
 | --- | --- |
 | Jev drives a real-time bot | Proven |
 | Jev reaches script-level play with no rules written for it | Proven |
-| Jev beats a well-written script | Not shown (+8.6 points on a working zBot, p 0.076; about 2 points trace to one decision) |
+| Jev beats a well-written script | Not shown (+8.6 points on a working zBot, p 0.076; roughly 2 points trace to one decision) |
 | Jev reads situations, not just labels | Not tested yet |
 
 The rest of this section explains how we got there, run by run.
@@ -194,11 +194,11 @@ The Jev numbers above were measured against a zBot that snagged on the cover cra
 
 **Where Jev and `cuehold` actually differ.** Replaying each of Jev's decisions through `cuehold` with the same situation and options, they differ in 41 of 1,207. The cases: 25 times Jev took the shot at half-settled aim where `cuehold` waits, 12 times it fell back where `cuehold` waits (8 with the attacker out of sight, 4 with aim not on them), and 4 times it waited during the bolt cycle where `cuehold` falls back. In 164 of 198 rounds Jev made exactly the choices `cuehold` would have.
 
-- **The half-settled shot is Jev's one real edge.** Jev won all 25 rounds where it took one; `cuehold` reaches that aim in 42 rounds and wins 86% of them (shooting in only 6). That is worth about 2 points of the 8.6. The 25 of 25 is a selected subset, since those rounds were already good enough to reach that aim.
-- **The other 6 points are unexplained.** They sit in rounds where the choices were identical, so they are either noise (the interval reaches zero) or timing: Jev peeks later (median 0.27 s into the round against 0.17 s), roughly its 95 ms request latency. Whether a later peek helps against a walking zBot was not tested. Jev is not faster; its shorter median round follows from which rounds it wins.
+- **The half-settled shot is Jev's one real edge.** Jev won all 25 rounds where it took one; `cuehold` reaches that aim in 42 rounds and wins 86% of them (shooting in only 6). That is worth roughly 2 points of the 8.6, a ballpark figure rather than a measurement: it compares Jev's wins with `cuehold`'s rate in different rounds, picked by whether they reached that moment. The 25 of 25 is a selected subset, since those rounds were already good enough to reach that aim.
+- **The other 6 points are unexplained.** They sit in rounds where the choices were identical, so they are either noise (the interval reaches zero) or timing: Jev peeks later (median 0.27 s into the round against 0.17 s), roughly its 95 ms request latency, a possible cause that was not tested. Whether a later peek helps against a walking zBot was not tested. Jev is not faster; its shorter median round follows from which rounds it wins.
 - **Jev did not find the full peek.** Peeking with the attacker out of sight, it counter-strafed in 182 of 182 decisions, like `cuehold` (169 of 169), where `sweep` waits. A `cuewait` script that finishes the peek instead did no better (69% against `cuehold` 70%), so there was nothing to find.
 
-So against a working zBot, Jev matches the best script and differs from it in one decision that matters, worth about 2 points. A run to isolate that shot and the timing effect would need thousands of rounds to see 2 to 3 points, so we did not run one.
+So against a working zBot, Jev won 75% to `cuehold`'s 67% (+8.6 points, 95% CI -0.3 to +17.5), unresolved by the pre-registered rule. Its choices were the same as `cuehold`'s in all but 41 of 1,207 decisions, the one that clearly mattered was the half-settled shot, and the remaining gap of about 6 points is not explained. A run to isolate that shot and the timing effect would need thousands of rounds to see 2 to 3 points, so we did not run one.
 
 ### Noisy cue: nothing past lane-matching
 
