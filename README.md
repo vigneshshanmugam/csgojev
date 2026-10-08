@@ -1,6 +1,8 @@
 # csgojev
 
-csgojev puts Jev in the AWPer's seat of a Counter-Strike 1.6 duel against the game's own bot (zBot), then measures whether Jev's decisions are what win the rounds. Short answer so far: Jev plays as well as a hand-written script that reads the same cues, but we could not show that it plays better than one. [Does Jev help?](#does-jev-help) has the full write-up.
+csgojev stress tests one idea: a slow decision model can play a fast game if a state machine owns what is legal, the engine owns the physics, and the model only picks the next move. Here the model is Jev, the game is Counter-Strike 1.6 and the opponent is the game's own bot (zBot).
+
+The idea holds up. Jev drives the AWPer at about 95ms per decision, beats the stock zBot in 76 of 96 AWP rounds, and on a two-lane map it follows a footsteps cue nobody wrote a rule for. What we could not show is Jev beating a well-written script: against the best one it won 75% to 67%, which our pre-registered rule calls unresolved, and its choices matched that script's in all but 41 of 1,207 decisions. [Does Jev help?](#does-jev-help) has the full write-up.
 
 ## What Jev is
 
@@ -29,10 +31,10 @@ holding ──peek──▶ peeking ──arrived──▶ scoped ──shoot─
 | `enemy.peek` | Swing out into the lane (0.55s, exposed and inaccurate while moving) |
 | `enemy.counterStrafe` | Stop dead part way out: less exposed, accurate at once |
 | `enemy.shoot` | Fire the AWP. One hit kills, then a 1.5s bolt cycle |
-| `enemy.fallBack` | Step back behind the pillar |
+| `enemy.fallBack` | Step back behind cover |
 | noop | Wait. Nothing can hit you, but you see nothing either |
 
-Along with the moves, Jev sees what the bot can sense: distance to the rifler in 2m steps, whether he is in sight or moving, footsteps, seconds since last contact, both players' HP, the round clock and how settled the scope is.
+Along with the moves, Jev sees what the bot can sense: distance to the rifler in 2m steps, whether he is in sight or moving, footsteps and which side they come from, seconds since last contact, both players' HP, the round clock and how settled the scope is.
 
 Inside real CS 1.6, a Metamod plugin gives Jev's bot a body in a dedicated server, the zBot plays the other side, and a TypeScript sidecar runs the machine and calls Jev:
 
@@ -56,24 +58,22 @@ Jev's wins out of 24 rounds per cell, same weapon on both sides:
 | 3 Expert | 16 | 13 |
 | total | 76/96 | 60/96 |
 
-For comparison, the same bot with placeholder aiming and no Jev lost 2 to 10 against Easy. At 24 rounds per cell the margin is about ±18 points, so the trend holds but single cells do not. The rifle path is untuned.
+Before Jev and the aim gate, the same bot with placeholder aiming lost 2 to 10 against Easy. At 24 rounds per cell the margin is about ±18 points, so the trend holds but single cells do not. The rifle path is untuned.
 
-This table shows the whole system works. It does not isolate Jev, because the comparison bot had worse aiming, not a different brain. The next section is about isolating Jev.
+This table shows the whole system works. It does not isolate Jev, because the comparison bot had worse aiming, not a different brain. The next section isolates Jev.
 
 ## Does Jev help?
 
 ### Short answer
 
-Jev works, and it plays as well as a hand-written script that reads the same cues, without anyone writing that rule for it. On the one map where a cue mattered, it also avoided a mistake the hand-written script made. What we could not show is Jev beating a well-written script: every edge we found in these duels, a one-line rule captured just as well. Against a zBot that walks its lane, Jev scored 75% to the best script's 67% (+8.6 points, p 0.076, unresolved); its choices were the same as that script's in all but 41 of 1,207 decisions, and the one difference that clearly mattered, taking the half-settled shot, is worth roughly 2 points (a rough estimate, see below).
+Jev reaches the level of the best hand-written script on every duel we built, without anyone writing its rules. It has not beaten that script by a margin we can defend. The duels turned out to have very few decisions that matter, and a one-line rule covers most of them.
 
 | Claim | Status |
 | --- | --- |
 | Jev drives a real-time bot | Proven |
 | Jev reaches script-level play with no rules written for it | Proven |
-| Jev beats a well-written script | Not shown (+8.6 points on a working zBot, p 0.076; roughly 2 points trace to one decision) |
-| Jev reads situations, not just labels | Not tested yet |
-
-The rest of this section explains how we got there, run by run.
+| Jev beats a well-written script | Not shown. +8.6 points on the working zBot, p 0.076, about 2 of those points trace to one decision |
+| Jev reads situations, not just labels | Not tested |
 
 ### How we tested
 
@@ -94,18 +94,18 @@ The brains live in `cs16/sidecar/src/brains.ts`:
 | `random` | A uniform pick among the legal moves |
 | `left`, `right` | Two-lane map: always peek that lane first |
 | `cue` | Two-lane map: peek the lane the footsteps came from, otherwise play like `rule` |
-| `cuehold` | `cue` with the scoped retreat removed |
+| `cuehold` | `cue` with the scoped retreat removed. The best script we found |
+| `cuewait` | `cuehold` that finishes the peek instead of stopping part way when nothing is in sight |
 | `sweep` | Two-lane map: ignores the cue, opens left, drops a lane that shows nothing for 3s and tries the other |
-| `cueswitch` (3s, 5s, 7s) | `cuehold` that drops a lane after a fixed time without a sighting |
-| `cuecheck` | `cuehold` that marks a lane dry whenever a peek ends unseen, and trusts a sighting over the label |
+| `cueswitch` (3s, 5s, 7s), `cuecheck` | `cuehold` variants that cross-check a cue that might be wrong |
 
-Three rules came out of early mistakes, and every run since follows them:
+Every run follows three rules, each learned from an early mistake:
 
 - **Balanced slots.** We run up to four isolated CS servers in parallel. `compare-balanced.sh` gives every brain every slot in a Latin-square order, because the first pilot ran one brain per slot and its headline gap turned out to be a slot effect.
 - **Pre-registration.** Each run folder has a `PREREGISTRATION.md` with the question, the predictions and the reading rule, written before the run. The result is appended after, including the predictions that missed.
-- **A stopping rule.** `compare-sequential.sh` adds passes of 100 rounds per brain and stops by Haybittle-Peto efficacy (|z| >= 3.29), non-binding futility (conditional power under 10%), or two-sided 0.05 at a cap of 400.
+- **A stopping rule** where it fits. `compare-sequential.sh` adds passes of 100 rounds per brain and stops by Haybittle-Peto efficacy (|z| >= 3.29), non-binding futility (conditional power under 10%), or two-sided 0.05 at a cap of 400.
 
-Every decision is logged with what the brain saw, the options, the choice and how the round ended (`runLog.ts`). `analyze.ts` turns the logs into a `report.md`: win rates with Wilson intervals, Fisher exact tests, outcomes by slot, route and cue condition, and a per-situation table of what each brain chose. Each run's meta line records the plugin hash, the git commit and a dirty flag. Win rates below count draws as non-wins.
+Every decision is logged with what the brain saw, the options, the choice and how the round ended (`runLog.ts`). `analyze.ts` turns the logs into a `report.md`: win rates with Wilson intervals, Fisher exact tests, outcomes by slot, route and cue condition, and a per-situation table of what each brain chose. It refuses a run file that holds more than one run. Each run's meta line records the plugin hash, the git commit and a dirty flag. Win rates count draws as non-wins.
 
 ### Phase 1: one lane, no lever
 
@@ -119,68 +119,27 @@ The first map, `jev_duel`, is a single 23m lane with one peek spot, so the only 
 | Lever check, AWP vs M4A1, sequential | 100 (futility stop) | rush 56%, rule 55% |
 | Lever check, AWP vs M4A1, held zBot | 400 (cap) | rush 54%, rule 48%, z 1.63 |
 
-The pilot looked like a win for Jev: 15-5 against `rule`'s 7-13 (p=0.025). Once every brain played every slot, the gap shrank to +4.8 points against `rule` and +9.5 against `rush` (p of 1.0 and 0.76). It was mostly a slot effect.
+The pilot looked like a win for Jev, 15-5 against `rule`'s 7-13 (p=0.025). Once every brain played every slot the gap shrank to +4.8 points against `rule` and +9.5 against `rush`, both far from significant. It was mostly a slot effect.
 
-Before spending more API calls on Jev, we asked whether this duel had anything to win at all. If peeking at once (`rush`) and waiting for a cue (`rule`) win equally often, the timing of the peek does not decide rounds, and a brain that times it better has nothing to gain. They tied in all three checks:
-
-- Against a pushing zBot with an AWP.
-- Against a pushing zBot with an M4A1, the rifler Jev's brief describes. This one stopped for futility at the first look, at 3% conditional power.
-- Against a held zBot that aims and fires but never advances (`jev_zhold 1`), not significant after the full 400 rounds.
-
-The held run was also the test for a mixed-opponent design. The trend favoured `rush` against both opponents, so a mix of the two has nothing to adapt to.
-
-Two smaller observations from these runs:
-
-- Jev opens like `rush`. It peeks from cover almost every round, and where it departs from the scripts it does so at 30 to 45% confidence. Part of that is instructed: the brief says waiting has a price.
-- Falling back while hurt comes up in about 5 of 100 rounds, so that decision cannot move the overall win rate by more than about 5 points.
+Before spending more API calls, we checked whether this duel had anything to win. Peeking at once (`rush`) and waiting for a cue (`rule`) tied against a pushing AWP zBot, a pushing M4A1 zBot and a held zBot that never advances (`jev_zhold 1`). If the timing of the peek does not decide rounds, a brain that times it better has nothing to gain, so we moved on to a map with a real decision.
 
 ### Phase 2: two lanes, a cue to read
 
-`jev_split` was built to create a decision that matters. It has two lanes split by a wall, and a peek spot for each lane that cannot see the other one. Each round the plugin (`jev_zroute`) walks the zBot down a random lane at running speed, then releases it to play on its own. The bot hears which side the footsteps come from, and Jev sees that as `footstepsFrom: left|right`. The brief describes the two lanes but deliberately does not say what footsteps mean, so following them has to come from Jev, not from the instructions.
+`jev_split` has two lanes split by a wall, and a peek spot for each lane that cannot see the other one. Each round the plugin (`jev_zroute`) walks the zBot down a random lane at running speed, then releases it to play on its own. The bot hears which side the footsteps come from, and Jev sees that as `footstepsFrom: left|right`. The brief describes the two lanes but deliberately does not say what footsteps mean, so following them has to come from Jev, not from the instructions.
 
-The checks without API calls came first, to confirm there was a lever:
+NOTE: everything in this section was measured after the route fix in `0e7462a`. The first round of two-lane runs used a route that made the zBot snag on the cover crates, see [Earlier results on the snagging route](#earlier-results-on-the-snagging-route).
 
-| Check | Rounds per brain | Result |
-| --- | --- | --- |
-| `cue` vs `left`, sequential | 100 (efficacy stop, z 3.72) | cue 71%, left 45% |
-| `cue` vs `right` | 100 | cue 67%, right 38% |
-| `cue` vs `sweep` | 100 | cue 71%, sweep 55% |
+**The lever is real but small.** Three script-only runs, two passes each at 198 rounds per brain:
 
-`cue` never peeked the wrong lane first, while `sweep` did in 48 of 100 rounds. Reading the cue clearly pays, so the Jev run was worth the API spend.
-
-The Jev run was pre-registered with a primary question (is Jev non-inferior to `cue`, within 10 points) and a secondary one (does Jev beat `sweep`). After a 10-round smoke test that Jev won 9-1, it ran in two looks of 99 rounds per brain on different route seeds:
-
-| Brain | First look (seed 23) | Second look (seed 37) | Combined, 198 rounds | Wrong-lane first peeks |
+| Run | Route seeds | `cuehold` | `sweep` | Other |
 | --- | --- | --- | --- | --- |
-| `jev` | 70-26-3 | 83-16-0 | 153-42-3, 77% | 0/194 |
-| `cue` | 64-35-0 | 67-32-0 | 131-67-0, 66% | 0/198 |
-| `sweep` | 51-31-17 | 56-36-7 | 107-67-24, 54% | 89/198 |
+| Clean lever check | 61 (twice) | 70% | 64% | `cue` 71% |
+| `cuewait` check | 71, 72 | 70% | 65% | `cuewait` 69% |
+| Jev run | 81, 82 | 67% | 63% | see below |
 
-- Primary: Jev was +11.1 points over `cue`. The one-sided 95% lower bound for the gap is about +3.7 points, well above the -10 point margin, so Jev is non-inferior.
-- Secondary: Jev was +23.2 points over `sweep` (p=0.0000016).
-- Jev picked the right lane on every first peek it made, without being told what footsteps mean. Median decision latency was 99ms (p90 183ms).
+Over the first two runs (396 rounds per brain) `cuehold` is about 6 points over `sweep` (p 0.11). Reading the cue pays, but much less than the 16 points we saw on the snagging route. `cuewait` tested whether stopping part way out was costing the scripts rounds. It was not: 69% against 70%. The left-route gap that suggested it came from a split I picked after seeing the data, and it did not replicate on fresh seeds.
 
-NOTE: Jev's denominator is 194, not 198, because 4 rounds in one block got no Jev decisions at all during an API stall. They were scored as non-wins (3 draws and 1 loss), so they count against Jev, not for it.
-
-### What Jev's lead over `cue` is made of
-
-`cue` inherits `rule`'s scoped retreat: fall back when hurt with the attacker in sight. In the Jev run, `cue` fell back in 131 decisions and Jev in 15, and `cue` never won a round after falling back while its aim was settling. So we built `cuehold`, which is `cue` with only that rule removed, and ran it against `cue` on the same route seeds, 200 rounds each with no API calls:
-
-| Brain | W-L-D | Win rate |
-| --- | --- | --- |
-| `cue` | 132-66-2 | 66% |
-| `cuehold` | 142-58-0 | 71% |
-| `jev` (earlier run, same seeds) | 153-42-3 | 77% |
-
-- `cue` scored 66% again, so its number in the Jev run was not an outlier.
-- Removing the retreat is worth about 5 points (p about 0.28), roughly half of Jev's +11.
-- Jev's remaining +6.3 over `cuehold` is not significant (p about 0.15), and it comes from a single look. On seed 23, Jev and `cuehold` tied at 70 wins each. On seed 37, Jev won 83 against 72. Settling 6 points properly would take about 600 rounds per brain.
-
-This is the strongest point in Jev's favour so far. A person wrote `cue`, it shipped with a rule that loses rounds, and Jev did not make that mistake. It is one instance, not a pattern.
-
-### Jev against a working zBot
-
-The Jev numbers above were measured against a zBot that snagged on the cover crates (see [Things we got wrong along the way](#things-we-got-wrong-along-the-way)). We reran Jev on the fixed route with fresh seeds (81 and 82), 198 rounds per brain, against `cuehold` (the best script) and `sweep`. All 1,198 Jev requests were live, with no errors and no draws.
+**Jev against the working zBot.** Pre-registered against `cuehold` (primary: within 5 points means "matches", 5 to 10 is "unresolved") and `sweep` (secondary), on fresh seeds after a 10-round smoke test that Jev won 9-1:
 
 | Brain | Pass 1 | Pass 2 | Combined | Win rate (95% CI) |
 | --- | --- | --- | --- | --- |
@@ -188,54 +147,59 @@ The Jev numbers above were measured against a zBot that snagged on the cover cra
 | `cuehold` | 65-34 | 67-32 | 132-66 | 67% (60-73) |
 | `sweep` | 63-36 | 61-38 | 124-74 | 63% (56-69) |
 
-- Jev against `cuehold`: +8.6 points (CI -0.3 to +17.5, p 0.076). Ahead in both passes, but the pre-registered reading for 5 to 10 points is "unresolved".
+- Jev against `cuehold`: +8.6 points (CI -0.3 to +17.5, p 0.076). Ahead in both passes, but unresolved by the rule set before the run.
 - Jev against `sweep`: +12.6 points (p 0.009).
-- Jev picked the right lane first in 198 of 198 rounds.
+- Jev picked the correct lane first in 198 of 198 rounds, from a cue its brief never explains.
+- All 1,198 requests were live, with no errors, no timeouts and no draws. Median latency was 95ms (p90 142ms), about 6 requests per round.
 
-**Where Jev and `cuehold` actually differ.** Replaying each of Jev's decisions through `cuehold` with the same situation and options, they differ in 41 of 1,207. The cases: 25 times Jev took the shot at half-settled aim where `cuehold` waits, 12 times it fell back where `cuehold` waits (8 with the attacker out of sight, 4 with aim not on them), and 4 times it waited during the bolt cycle where `cuehold` falls back. In 164 of 198 rounds Jev made exactly the choices `cuehold` would have.
+**Where Jev and `cuehold` differ.** I replayed each of Jev's 1,207 decisions through `cuehold` with the same situation and options. They differ in 41:
 
-- **The half-settled shot is Jev's one real edge.** Jev won all 25 rounds where it took one; `cuehold` reaches that aim in 42 rounds and wins 86% of them (shooting in only 6). That is worth roughly 2 points of the 8.6, a ballpark figure rather than a measurement: it compares Jev's wins with `cuehold`'s rate in different rounds, picked by whether they reached that moment. The 25 of 25 is a selected subset, since those rounds were already good enough to reach that aim.
-- **The other 6 points are unexplained.** They sit in rounds where the choices were identical, so they are either noise (the interval reaches zero) or timing: Jev peeks later (median 0.27 s into the round against 0.17 s), roughly its 95 ms request latency, a possible cause that was not tested. Whether a later peek helps against a walking zBot was not tested. Jev is not faster; its shorter median round follows from which rounds it wins.
-- **Jev did not find the full peek.** Peeking with the attacker out of sight, it counter-strafed in 182 of 182 decisions, like `cuehold` (169 of 169), where `sweep` waits. A `cuewait` script that finishes the peek instead did no better (69% against `cuehold` 70%), so there was nothing to find.
-
-So against a working zBot, Jev won 75% to `cuehold`'s 67% (+8.6 points, 95% CI -0.3 to +17.5), unresolved by the pre-registered rule. Its choices were the same as `cuehold`'s in all but 41 of 1,207 decisions, the one that clearly mattered was the half-settled shot, and the remaining gap of about 6 points is not explained. A run to isolate that shot and the timing effect would need thousands of rounds to see 2 to 3 points, so we did not run one.
-
-### Noisy cue: nothing past lane-matching
-
-A clean footsteps label reduces the task to mapping a label to a lane. To test reading rather than mapping, we corrupted the label in the sidecar (`cs16/sidecar/src/cueNoise.ts`). Each round it was either true, hidden, or pointing at the wrong lane, the same for every brain on a slot. Sightings stayed true. The gate before any Jev run: a script that cross-checks the label has to beat `cuehold` by at least 8 points, otherwise there is nothing for a smarter brain to recover.
-
-| Run | Cue noise | Rounds per brain | Result |
+| Situation | Jev | `cuehold` | Count |
 | --- | --- | --- | --- |
-| Noise only, no cross-check | 25% hidden, 25% flipped | 100 | cue 50%, cuehold 50% |
-| 3s cross-check | 25% hidden, 25% flipped | 99 | cue 57%, cuehold 54%, cueswitch 52% |
-| 5s and 7s cross-checks | 10% hidden, 40% flipped | 99 | cuehold 53%, cueswitch5 63%, cueswitch7 52% |
-| Cross-check without a timer | 10% hidden, 40% flipped | 100 | cuehold 56%, cuecheck 56% |
+| Scoped, attacker in sight, aim half settled | shoot | wait | 25 |
+| Scoped, attacker out of sight | fall back | wait | 8 |
+| Scoped, attacker in sight, aim not on him | fall back | wait | 4 |
+| Cycling the bolt, aim settling | wait | fall back | 4 |
 
-What each run showed:
+- **The half-settled shot is Jev's one real edge.** Jev won all 25 rounds where it took one, and 22 of those shots killed within 1.5s. `cuehold` reaches that aim in 42 rounds, shoots in only 6 and wins 86%. That puts the shot at roughly 2 of the 8.6 points. It is a ballpark, not a measurement, because it compares different rounds picked by whether they reached that moment.
+- **The other 6 points are not explained.** In 164 of 198 rounds Jev made exactly the choices `cuehold` would have, so that part of the gap is either noise (the interval reaches zero) or timing. Jev acts about 100ms later than the script because of its request latency, and peeks at 0.27s into the round against 0.17s. Whether a later peek helps against a walking zBot was not tested.
+- **Jev did not find anything the scripts missed beyond that shot.** Peeking with nothing in sight it counter-strafed in 182 of 182 decisions, like `cuehold`, and `cuewait` already showed the full peek would not have paid.
 
-1. **Noise bites.** Both scripts that trust the label fell 16 to 21 points and won only 25% of flipped rounds.
-2. **A 3-second timer gives up too early.** On true-cue rounds `cueswitch` won 59% against `cuehold`'s 74%. About one zBot in five takes longer than 3s to show up, and by then the script had already left the right lane.
-3. **The 5 and 7-second timers raced the machine.** The machine's scoped state falls back to cover on its own after 5 seconds (`EXPOSED_MS`), and the script restarted its timer on every re-peek. So the 7-second timer never fired and played exactly like `cuehold`, and the 5-second one only sometimes beat the reflex. Its +10 points was that race, not a real recovery.
-4. **Without a timer there is still nothing.** `cuecheck` marks a lane dry whenever a peek ends unseen, reflex included, and it peeked both lanes in 34 of 40 flipped rounds. It cut flipped-round draws from 25 to 10, but the fights it found were about even (17 wins, 13 losses), and it gave back a few true and hidden rounds. Net, a tie.
+A run that isolates a 2 to 3 point effect would need thousands of rounds per brain, so we did not run one.
 
-Part of the reason is the map. After its route the released zBot stops about 16m out and waits, often out of sight of both peek spots. Correct-lane peeks that started 8s or more into a round found it in only 43 of 111 tries, against 147 of 188 for earlier ones. A wrong first guess therefore costs a draw rather than a death, and many of those draws cannot be won by any lane choice. That caps what any cross-check, Jev included, could recover here, so we did not run Jev on the noisy cue.
+### Earlier results on the snagging route
+
+The first round of two-lane runs used routes at `x=±3.2`. The zBot's hull is about 0.4m either side of its centre and the cover crates start at `x=±3.6`, so it clipped a crate's corner and stopped for good, often out of sight of both peek spots. That turned many rounds into draws and handed out easy kills. Comparisons inside each run stayed fair, because every brain faced the same zBot, but the absolute rates and the size of each lever are not results about a working opponent.
+
+Kept as history:
+
+| Run | Rounds per brain | Result |
+| --- | --- | --- |
+| `cue` vs `left`, sequential | 100 (efficacy stop) | cue 71%, left 45% |
+| `cue` vs `sweep` | 100 | cue 71%, sweep 55% |
+| Jev vs `cue` vs `sweep` | 198 | jev 153-42-3 (77%), cue 131-67-0 (66%), sweep 107-67-24 (54%) |
+| `cuehold` vs `cue` | 200 | cuehold 71%, cue 66% |
+
+Two findings from these runs still stand as observations, with the caveat above:
+
+- **`cue`'s retreat rule cost it about 5 points.** `cue` inherited `rule`'s scoped retreat, fell back in 131 decisions against Jev's 15, and never won a round after falling back while its aim was settling. Removing that rule is what produced `cuehold`. Jev never needed the rule removed.
+- **A noisy cue left nothing to recover.** We corrupted the footsteps label in the sidecar (`cs16/sidecar/src/cueNoise.ts`): hidden or pointing at the wrong lane in some rounds, the same for every brain on a slot. Scripts that trust the label fell 16 to 21 points. None of the cross-checking scripts beat `cuehold` by the 8 points we set as the gate for a Jev run: the 3-second timer gave up on the right lane too early, the 5 and 7-second timers raced the machine's own 5-second fallback (`EXPOSED_MS`), and `cuecheck`, which has no timer, tied `cuehold` at 56%. A parked zBot made a wrong first guess cost a draw rather than a death, which capped what any brain could recover, so this null may not hold on the fixed route.
 
 ### Things we got wrong along the way
 
-These were caught in the logs and fixed before the next run. Several of them would have changed the headline if missed.
+Each of these was caught in the logs and fixed before the next run. Several would have changed the headline if missed.
 
 - **Slot effect.** The pilot's 40-point gap came from running one brain per server. Fixed with balanced slots.
 - **A plugin build without `jev_zhold`.** The hold silently did nothing. `compare.sh` now refuses to start unless the plugin confirms the hold and the enemy weapon.
 - **A dirty flag that was always true,** because a tracked benchmark file changed during runs. It now checks code paths only.
-- **A zBot spawn out of sight.** One of four spawns sat behind the player's cover crate, so a held zBot never showed up and a quarter of that run's rounds were draws. The spawn row has moved.
-- **The bot aimed through walls.** While scoped or cycling it aimed at the zBot's live position whenever it was alive, and `g_lastSeenAt` tracked it behind walls. This inflated absolute win rates but did not bias comparisons inside a run. It was fixed before the two-lane runs.
-- **A noise roll replayed in every block.** The first noisy-cue run keyed the roll on round number only, so all 8 blocks saw the same 25 rolls. It is now keyed on the slot as well.
-- **Stalled blocks.** Two blocks in one noisy-cue run stopped with the machine stuck. They were rerun, and the partial blocks were left out.
-- **A wrong explanation.** The 5-second gain was first explained as a recovery window that closes when the zBot's route ends. The logs showed the timer racing the exposure reflex instead, and the run's pre-registration carries the correction.
-
-NOTE: every `jev_split` run up to `7285786` used a placeholder navmesh: `cs16/gamedata/maps/jev_split.nav` was byte-identical to `jev_duel.nav` (added in `0a4cd15` to stop Condition Zero from auto-generating a mesh). A real mesh, learned with `cs16/learn-nav.sh jev_split`, replaced it afterwards. A 20-round smoke test on the real mesh did not change the released zBot's behaviour: drawn rounds still end with the zBot 16 to 18m from the AWPer, and the share of late peeks (10s or later) that see it within 6s was 5 of 32 (16%), against 27 of 213 (13%) on the placeholder. So the placeholder mesh was not what parked the zBot. The scripted route completed in only 3 of 20 rounds (`zroute complete` in the server log); in rounds the zBot survived it often never reached the final waypoint, and 16 to 18m from the AWPer is about mid-lane on its route. A 1Hz trace of the zBot's distance (`OBS_TRACE`, `cs16/sidecar/src/obsTrace.ts`) found the cause: on right-route rounds it walked for 2 to 3 seconds and then stopped for good at 17m, which is `x=3.2, z=-3.3`. The right cover crate starts at `x=3.6` and the zBot's hull is about 0.4m either side, so it clipped the crate's corner. Moving the lane routes inward to `x=±2.8` fixed it. Two 14-round traces on the new route (same `left` brain, seed 53) against one on the old: right-route draws fell from 3 of 4 to 1 of 8, and the left lane changed too. A brain that always peeks left won 9 of 10 left-route rounds on the old route and 12 of 20 on the new one (7-3 and 5-5), and left-route rounds ran several seconds longer. So the zBot was handing out easy kills on both lanes. These samples are small, but the direction is the same in all of them. A regression test (`split.test.ts`, hull clearance) now fails on the old legs.
-
-That means every two-lane result so far, including the clean-cue ones (Jev 77%, `cue` 66%, `cuehold` 71%, `sweep` 54%) and the noisy-cue null, was measured against a zBot that snagged on both crates. Comparisons inside each run stay fair, because every brain faced the same opponent, but a working zBot can change which decisions matter and the absolute rates. A clean lever check on the fixed route (two passes, 198 rounds per arm, same route seed) gave `cue` 71%, `cuehold` 70% and `sweep` 64%, with no draws. The cue-over-`sweep` gap is +7 points (p about 0.12), against +16 on the old route, so reading the cue still seems to pay but less, and the earlier Jev margins (+11 over `cue`, +23 over `sweep`) should not be quoted as results about a working opponent. A follow-up on fresh seeds (`cuewait`, a cue reader that finishes the peek instead of stopping part way) found no gain: 69% against `cuehold` 70% and `sweep` 65%. The left-route gap that suggested it did not replicate, so it was noise from a split chosen after the fact. Across all four fixed-route passes (396 rounds per arm) `cuehold` is about 6 points over `sweep`. Jev against the fixed-route zBot (fresh seeds 81 and 82, 198 rounds per arm, 1,198 live requests, no errors, no draws): `jev` 149-49 (75%), `cuehold` 132-66 (67%), `sweep` 124-74 (63%). Jev is +8.6 points over `cuehold` (95% CI -0.3 to +17.5, p 0.076, ahead in both passes), which is short of both "matches" and a clear win, and +12.6 over `sweep` (p 0.009). It still counter-strafes every time it peeks unseen (182 of 182), so it did not find the full peek, and it picked the correct lane first in 198 of 198 rounds.
+- **A zBot spawn out of sight.** One of four spawns sat behind the player's cover crate, so a held zBot never showed up. The spawn row has moved.
+- **The bot aimed through walls.** While scoped or cycling it tracked the zBot's live position behind walls. This inflated absolute win rates but did not bias comparisons inside a run, and was fixed before the two-lane runs.
+- **A noise roll replayed in every block.** The first noisy-cue run keyed the roll on round number only. It is now keyed on the slot as well.
+- **A timer that raced the machine.** The 5-second cross-check's gain was first explained as a recovery window. The logs showed the timer racing the exposure reflex instead.
+- **A placeholder navmesh.** `jev_split.nav` was byte-identical to `jev_duel.nav` up to `7285786`. A real mesh (`cs16/learn-nav.sh jev_split`) replaced it, but did not change the parked zBot, so it was not the cause.
+- **A route that snagged on the cover crates.** A 1Hz trace of the zBot's distance (`OBS_TRACE`, `cs16/sidecar/src/obsTrace.ts`) showed it stopping at `x=3.2, z=-3.3` on right-route rounds. Moving the routes to `x=±2.8` fixed both lanes: right-route draws fell from 3 of 4 to 1 of 8, and a brain that always peeks left dropped from 9 of 10 left-route wins to 12 of 20. `split.test.ts` now fails any route that comes within a hull width of a crate.
+- **One run written twice into the same folder.** Both passes were complete and were split by their meta lines, and `analyze.ts` now refuses such files.
+- **A split chosen after seeing the data.** The left-route gap behind `cuewait` did not replicate.
 
 NOTE: the route seed is passed to `compare.sh` but not yet written into the run's meta line, so each run's seed is recorded only in its pre-registration.
 
@@ -243,15 +207,15 @@ NOTE: the route seed is passed to `compare.sh` but not yet written into the run'
 
 Proven:
 
-- Jev can drive a real-time bot: about 100ms per decision, only legal moves, 76 of 96 AWP rounds against the stock zBot.
-- Jev reaches the level of a hand-written cue reader with no rules written for it, on a cue its brief never explains.
-- On this evidence, Jev avoided a rule that cost a human-written script about 5 points.
+- A ~100ms model can drive a real-time bot when a machine owns what is legal: about 6 decisions per round, no errors over 1,198 live requests, 76 of 96 AWP rounds against the stock zBot.
+- Jev reaches the level of the best hand-written cue reader with no rules written for it, on a cue its brief never explains.
+- Jev did not pick up the rule that cost `cue` about 5 points on the snagging route, and on the working zBot it takes a half-settled shot the script waits on.
 
 Not proven:
 
-- That Jev beats a well-written script. Its +6 over `cuehold` comes from one look and is not significant.
-- That Jev reads situations rather than labels. The only lever we found was a direct label-to-lane mapping, and on the noisy cue no script could recover anything, so there was nothing left for Jev to show.
-- Anything about ordinary matches. `jev_split` is a cue task we designed, and Jev's one-lane behaviour is partly shaped by its brief.
+- That Jev beats a well-written script. +8.6 points is unresolved, and only about 2 of them trace to a decision.
+- That Jev reads situations rather than labels. The only lever we found is a direct label-to-lane mapping, and a one-line rule captures it.
+- Anything about ordinary matches. `jev_split` is a cue task we designed.
 
 Not tested:
 
@@ -261,20 +225,19 @@ Not tested:
 
 ### What's next
 
-The one experiment that can show Jev helps is a duel where no fixed rule wins. This is in progress:
+The duels so far have too few decisions for a smarter brain to stand out. The ideal next test is an opponent that adapts, because a fixed rule is easy to exploit and reading the situation would actually matter:
 
-- Change `jev_zroute` so the zBot keeps pushing toward the AWPer after its route. A wrong or late read then costs a death instead of a draw, and when to switch lanes becomes a real trade-off.
-- Optionally mix a pushing and a holding opponent from round to round, with cues that are only partly reliable.
-- Compare Jev against the best of a tuned family of scripts, for example a sweep of switch timers, not against one script. Otherwise a win could just mean a weak script, as `cue`'s retreat rule showed.
-- Keep the same gate: if no script variant beats `cuehold` without API calls, there is no lever and no Jev run.
+- **Humans in the loop.** The browser prototype now keeps a best-of-20 Human vs Jev scoreboard. To turn that into evidence rather than a demo, players would need to face Jev and the best script without knowing which, which is not built yet.
+- **If the claim "beats a tuned script" is needed on `jev_split`.** About 450 rounds per brain on fresh seeds, `jev` against `cuehold` and a `cuehold` with a 100ms delay before each move, to separate Jev's decisions from its latency. Roughly 2,700 requests and 4 to 5 hours. Even a clean win would prove a small edge on one map.
+- **A cheap check before any Jev run on the noisy cue.** The noisy-cue null was measured on the snagging route. Rerunning `cuehold` against `cuecheck` on the fixed route costs no API calls.
 
-Not worth doing on current evidence: a 600-round run to settle the 6 points, Jev on the current noisy cue, or `jevmem`.
+Not worth doing on current evidence: more Jev rounds on `jev_split` without a timing control, or `jevmem`.
 
 Run logs, reports and pre-registrations are written to `cs16/runs/` (gitignored). [`cs16/FINDINGS.md`](cs16/FINDINGS.md) keeps the same results as a running log.
 
 ## Two ways to watch it
 
-**Browser prototype** (`pnpm dev`). You play the rifler and Jev is the AWPer, in Three.js. It runs the same machine, aim gate and map geometry as the CS sidecar, with CS 1.6 numbers: AK-47 damage and fire rate, GoldSrc movement (221 u/s, `sv_accelerate` 5, `sv_friction` 4) and a 90 degree FOV. `?sens=` sets mouse sensitivity (default 3, the CS default).
+**Browser prototype** (`pnpm dev`). You play the rifler and Jev is the AWPer, in Three.js, with a best-of-20 scoreboard kept in local storage. It runs the same machine, aim gate and map geometry as the CS sidecar, with CS 1.6 numbers: AK-47 damage and fire rate, GoldSrc movement (221 u/s, `sv_accelerate` 5, `sv_friction` 4) and a 90 degree FOV. `?sens=` sets mouse sensitivity (default 3, the CS default). The deployed build calls Jev through `api/jev.ts`, which keeps the key server-side and falls back to the mock past a per-IP limit or a daily cap (`JEV_DAILY_CAP`, default 2000).
 
 **Real Counter-Strike 1.6.** The plugin, a dedicated server in Docker and the sidecar described above. You can watch Jev against a zBot, or join from the browser as CT and play it yourself.
 
@@ -307,8 +270,10 @@ packages/jev/        @xstate/jev: lets Jev pick the next event for an XState act
 src/game/
   enemyMachine.ts    the machine and Jev's brief, shared by the prototype and the CS sidecar
   map.ts split.ts    level geometry for both maps, the single source for prototype, CS maps and waypoints
+  score.ts           Human vs Jev scoreboard for the prototype
 src/                 Three.js prototype
-server/jevApi.ts     keeps the API key server-side for the prototype
+api/jev.ts           deployed Jev endpoint: key server-side, rate limit, daily cap
+server/jevApi.ts     keeps the API key server-side for the local prototype
 scripts/duel.ts      headless prototype duel
 cs16/
   sidecar/           perception in, decision out (protocol, bot, brains, analysis)
