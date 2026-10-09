@@ -2,7 +2,7 @@
 
 csgojev stress tests one idea: a slow decision model can play a fast game if a state machine owns what is legal, the engine owns the physics, and the model only picks the next move. Here the model is Jev, the game is Counter-Strike 1.6 and the opponent is the game's own bot (zBot).
 
-The idea holds up. Jev drives the AWPer at about 95ms per decision, beats the stock zBot in 76 of 96 AWP rounds, and on a two-lane map it follows a footsteps cue nobody wrote a rule for. What we could not show is Jev beating a well-written script: against the best one it won 75% to 67%, which our pre-registered rule calls unresolved, and its choices matched that script's in all but 41 of 1,207 decisions. [Does Jev help?](#does-jev-help) has the full write-up.
+The idea holds up. Jev drives the AWPer at about 95ms per decision, beats the stock zBot in 76 of 96 AWP rounds, and on a two-lane map it follows a footsteps cue nobody wrote a rule for. What we could not show is Jev beating a well-written script: against the best one it won 75% to 67%, which our pre-registered rule calls unresolved, and its choices matched that script's in all but 41 of 1,207 decisions. [Testing whether Jev helps](#testing-whether-jev-helps) has the full write-up.
 
 ## What Jev is
 
@@ -62,7 +62,7 @@ Before Jev and the aim gate, the same bot with placeholder aiming lost 2 to 10 a
 
 This table shows the whole system works. It does not isolate Jev, because the comparison bot had worse aiming, not a different brain. The next section isolates Jev.
 
-## Does Jev help?
+## Testing whether Jev helps
 
 ### Short answer
 
